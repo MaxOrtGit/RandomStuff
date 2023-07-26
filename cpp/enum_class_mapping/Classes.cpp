@@ -1,0 +1,33 @@
+#include <iostream>
+class BaseClass {
+};
+
+class ClassA : public BaseClass {
+public:
+  ClassA() {
+    std::cout << "ClassA constructor" << std::endl;
+  }
+};
+
+class ClassB : public BaseClass {
+public:
+  ClassB() {
+    std::cout << "ClassB constructor" << std::endl;
+  }
+};
+
+class ClassC : public BaseClass {
+public:
+  ClassC() {
+    std::cout << "ClassC constructor" << std::endl;
+  }
+};
+
+class ClassD : public BaseClass {
+public:
+  ClassD() {
+    std::cout << "ClassD constructor" << std::endl;
+  }
+};
+
+#define CLASSES_LIST ClassA, ClassB, ClassC, ClassD
