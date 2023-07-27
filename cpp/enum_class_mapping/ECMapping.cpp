@@ -19,7 +19,7 @@ std::unique_ptr<BaseClass> CreateInstance() {
 }
 
 template<typename... Args>
-auto AddConstructors() {
+auto MakeConstructorVector() {
   return FuncVec<std::unique_ptr<BaseClass>()>{CreateInstance<Args>...};
 }
 
@@ -30,7 +30,7 @@ void ColorInstance(int r, int g, int b) {
 }
 
 template<typename... Args>
-auto AddColor() {
+auto MakeColorVector() {
   return FuncVec<void(int, int, int)>{ColorInstance<Args>...};
 }
 
@@ -39,9 +39,9 @@ auto AddColor() {
 
 // ------------------ Enum to creating an instance ------------------
 // Function to create an instance based on the enum value
-std::unique_ptr<BaseClass> createInstanceFromEnum(Classes enumValue) {
+std::unique_ptr<BaseClass> CreateObjectFromEnum(Classes enumValue) {
   // Creates a vector of functions that create an instance of the corresponding class
-  auto constructors = AddConstructors<CLASSES_LIST>();
+  auto constructors = MakeConstructorVector<CLASSES_LIST>();
   int index = static_cast<int>(enumValue);
 
   // Calls the function and returns pointer to the instance
@@ -50,26 +50,26 @@ std::unique_ptr<BaseClass> createInstanceFromEnum(Classes enumValue) {
 
 
 int main() {
-  // Enum to create an instance
+  // Enum to object creation
   Classes enumValue = Classes::ClassC;
-  auto instance = createInstanceFromEnum(enumValue);
+  auto instance = CreateObjectFromEnum(enumValue);
   std::cout << std::endl;
 
 
   // Constructs 10 random classes
-  auto constructors = AddConstructors<CLASSES_LIST>();
+  auto constructors = MakeConstructorVector<CLASSES_LIST>();
   
   std::mt19937 rng(static_cast<unsigned>(std::time(0)));
   std::uniform_int_distribution<int> dist(0, constructors.size() - 1);
   for (int i = 0; i < 10; ++i) {
-      int randomIndex = dist(rng);
-      std::unique_ptr<BaseClass> instance = constructors[randomIndex]();
+    int randomIndex = dist(rng);
+    std::unique_ptr<BaseClass> instance = constructors[randomIndex]();
   }
 
   // Colors all classes (calling function with arguments)
-  auto colorers = AddColor<CLASSES_LIST>();
+  auto colorers = MakeColorVector<CLASSES_LIST>();
   for (auto& colorer : colorers) {
-      colorer(1, 2, 3);
+    colorer(1, 2, 3);
   }
 
   return 0;
