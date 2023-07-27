@@ -1,5 +1,9 @@
 #include <iostream>
 class BaseClass {
+public:
+  static void PrintColor(int r, int g, int b) {
+    std::cout << "Color: " << r << ", " << g << ", " << b << std::endl;
+  }
 };
 
 class ClassA : public BaseClass {
