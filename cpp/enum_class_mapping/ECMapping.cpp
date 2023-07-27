@@ -4,83 +4,81 @@
 #include <memory>
 #include <random>
 #include <ctime>
-#include "Classes.cpp"
+#include <unordered_map>
+#include "Classes.h"
 
-enum class Classes { CLASSES_LIST };
-
-
+// Template for vector of functions (pass in ReturnType(Args...)))
 template<typename Function>
 using FuncVec = std::vector<std::function<Function>>;
 
+// Macro to create function that returns vector of the function templated with 
+//  all classes passed into the template
 #define MAKE_VECTOR_FUNCTION(func) \
   template<typename... Args> \
   auto Make##func##Vector() { \
     return FuncVec<decltype(func<BaseClass>)>{func<Args>...}; \
   }
 
+// Macro to create a variable of a vector of functions (pass in variable name, function)
 #define CreateVectorOfFunctions(variableName, func) \
   MAKE_VECTOR_FUNCTION(func) \
-  auto variableName = Make##func##Vector<CLASSES_LIST>();
+  FuncVec<decltype(func<BaseClass>)> variableName = Make##func##Vector<CLASSES_LIST>();
 
-/* example of CreateVectorOfFunctions(constructors, ConstructorInstance)
-
-  // ------------------ Function to return vector ------------------
-  template<typename... Args>
-  auto MakeConstructorInstanceVector() {
-    return FuncVec<decltype(ConstructorInstance<BaseClass>)>{ConstructorInstance<Args>...};
+// Function to map enum to vector of functions
+template<typename Function>
+auto MapEnumToVector(FuncVec<Function>&& vector)
+{
+  std::unordered_map<Classes, std::function<Function>> map;
+  for (int i = 0; i < vector.size(); ++i) {
+    map.emplace(static_cast<Classes>(i), vector[i]);
   }
+  return map;
+}
 
-  // ------------------ Creating the vector ------------------
-  auto constructors = MakeConstructorInstanceVector<CLASSES_LIST>();
-*/
+// Macro to create a variable of a map of functions (pass in variable name, function)
+#define CreateMapOfFunctions(variableName, func) \
+  MAKE_VECTOR_FUNCTION(func) \
+  auto variableName = MapEnumToVector(Make##func##Vector<CLASSES_LIST>());
+
 
 // ------------------ Function to create an instance ------------------
 template<typename T>
 std::unique_ptr<BaseClass> ConstructorInstance() {
   return std::make_unique<T>();
 }
-CreateVectorOfFunctions(constructors, ConstructorInstance)
+CreateMapOfFunctions(constructors, ConstructorInstance)
 
 // ------------------ Function call color on an instance ------------------
 template<typename T>
 void ColorInstance(int r, int g, int b) {
   T::PrintColor(r, g, b);
 }
-CreateVectorOfFunctions(colorers, ColorInstance)
+CreateMapOfFunctions(colorers, ColorInstance)
+
+// ------------------ Setting up random ------------------
+
+using Dist = std::uniform_int_distribution<int>;
+std::mt19937 rng(static_cast<unsigned>(std::time(0)));
+
 
 // ------------------ Using the functions ------------------
 
-// ------------------ Enum to creating an instance ------------------
-// Function to create an instance based on the enum value
-std::unique_ptr<BaseClass> CreateObjectFromEnum(Classes enumValue) {
-  // Creates a vector of functions that create an instance of the corresponding class
-  int index = static_cast<int>(enumValue);
-
-  // Calls the function and returns pointer to the instance
-  return constructors[index]();
-}
-
 int main() {
-  // Enum to object creation
-  Classes enumValue = Classes::ClassC;
-  auto instance = CreateObjectFromEnum(enumValue);
+  // Calling templated function
+  auto instance = constructors[Classes::ClassC]();
   std::cout << std::endl;
-
-
-  // Constructs 10 random classes
-  auto constructors = MakeConstructorInstanceVector<CLASSES_LIST>();
   
-  std::mt19937 rng(static_cast<unsigned>(std::time(0)));
-  std::uniform_int_distribution<int> dist(0, constructors.size() - 1);
-  for (int i = 0; i < 10; ++i) {
-    int randomIndex = dist(rng);
-    std::unique_ptr<BaseClass> instance = constructors[randomIndex]();
+  Dist dist(0, constructors.size() - 1);
+  for (int i = 0; i < 3; ++i) {
+    auto instance = constructors[static_cast<Classes>(dist(rng))]();
   }
 
   // Colors all classes (calling function with arguments)
-  for (auto& colorer : colorers) {
-    colorer(1, 2, 3);
+  Dist CDist(0, 255);
+  for (const auto& [_, func] : colorers) {
+    func(CDist(rng), CDist(rng), CDist(rng));
   }
+
 
   return 0;
 }

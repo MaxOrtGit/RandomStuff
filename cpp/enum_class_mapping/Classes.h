@@ -1,4 +1,6 @@
 #include <iostream>
+
+
 class BaseClass {
 public:
   static void PrintColor(int r, int g, int b) {
@@ -35,3 +37,5 @@ public:
 };
 
 #define CLASSES_LIST ClassA, ClassB, ClassC, ClassD
+
+enum class Classes { CLASSES_LIST };
