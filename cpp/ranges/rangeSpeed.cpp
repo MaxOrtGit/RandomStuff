@@ -2,6 +2,7 @@
 #include <vector>
 #include <iostream>
 #include <chrono>
+#include <numeric>
 
 template<typename Func>
 auto measureExecutionTime(Func&& func, int iterations = 10000)
@@ -21,8 +22,15 @@ void testFunc(Func&& func, int attempts = 10)
   std::cout << std::endl;
 }
 
-auto v1 = std::views::iota(0, 1000);
-auto v2 = std::views::iota(1000, 2000);
+std::vector<int> vector_from_iota(int start, int end)
+{
+  std::vector<int> v(end - start);
+  std::iota(std::begin(v), std::end(v), start);
+  return v;
+}
+
+auto v1 = vector_from_iota(0, 10000);
+auto v2 = vector_from_iota(10000, 20000);
 
 auto addVectors1()
 {
