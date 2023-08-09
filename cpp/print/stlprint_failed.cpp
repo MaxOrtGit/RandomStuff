@@ -1,3 +1,4 @@
+// tried to make the vector of types instead be a vector for pair<type, formatter<T>> but it didn't work
 
 #include <print>
 #include <string_view>
@@ -5,6 +6,7 @@
 #include <vector>
 #include <ranges> // find
 #include <iostream>
+#include <utility> // pair
 
 using namespace std;
 
@@ -52,6 +54,15 @@ constexpr formatter<T> parseFormatter(basic_format_parse_context<CharT>& ctx, au
   return f;
 }
 
+struct base_formatter {
+};
+
+template <typename T>
+struct new_formatter : base_formatter {
+  formatter<T> f;
+  constexpr new_formatter(formatter<T> f) : f(f) {}
+};
+
 
 
 // {} || {:} print all
@@ -64,16 +75,15 @@ struct formatter<Object> {
 private:
   enum class type { i, d, c, s, none};
 
-  vector<type> types;
-
-  formatter<int> int_formatter;
-  formatter<double> double_formatter;
-  formatter<char> char_formatter;
-  formatter<string_view> string_formatter;
+  vector<pair<type, unique_ptr<base_formatter>>> types;
 
   static constexpr bool in_vector(auto const& v, type e)
   {
-    return ranges::find(v, e) != v.end();
+    for (auto i = 0; i < v.size(); i++)
+    {
+      if (v[i].first == e) return true;
+    }
+    return false;
   }
 
 
@@ -90,25 +100,37 @@ public:
       switch (*it++)
       {
       case 'i':
+      {
         if (in_vector(types, type::i)) throw format_error("Duplicate type");
-        types.push_back(type::i);
-        int_formatter = parseFormatter<int>(ctx, it);
+        base_formatter* nf = static_cast<base_formatter*>(new new_formatter<int>(parseFormatter<int>(ctx, it)));
+        pair<type, unique_ptr<base_formatter>> p(type::i, unique_ptr<base_formatter>(nf));
+        types.push_back(p);
         break;
+      }
       case 'd':
+      {
         if (in_vector(types, type::d)) throw format_error("Duplicate type");
-        types.push_back(type::d);
-        double_formatter = parseFormatter<double>(ctx, it);
+        base_formatter* nf = static_cast<base_formatter*>(new new_formatter<double>(parseFormatter<double>(ctx, it)));
+        pair<type, unique_ptr<base_formatter>> p(type::d, unique_ptr<base_formatter>(nf));
+        types.push_back(p);
         break;
+      }
       case 'c':
+      {
         if (in_vector(types, type::c)) throw format_error("Duplicate type");
-        types.push_back(type::c);
-        char_formatter = parseFormatter<char>(ctx, it);
+        base_formatter* nf = static_cast<base_formatter*>(new new_formatter<char>(parseFormatter<char>(ctx, it)));
+        pair<type, unique_ptr<base_formatter>> p(type::c, unique_ptr<base_formatter>(nf));
+        types.push_back(p);
         break;
+      }
       case 's':
+      {
         if (in_vector(types, type::s)) throw format_error("Duplicate type");
-        types.push_back(type::s);
-        string_formatter = parseFormatter<string_view>(ctx, it);
+        base_formatter* nf = static_cast<base_formatter*>(new new_formatter<string_view>(parseFormatter<string_view>(ctx, it)));
+        pair<type, unique_ptr<base_formatter>> p(type::s, unique_ptr<base_formatter>(nf));
+        types.push_back(p);
         break;
+      }
       default:
         throw format_error("Unknown type");
       }
@@ -121,24 +143,36 @@ public:
     auto out = format_to(ctx.out(), "Object: ");
     for (auto i = 0; i < types.size(); i++)
     {
-      switch (types[i])
+      switch (types[i].first)
       {
       case type::i:
+      {
         out = format_to(out, "i=");
-        out = int_formatter.format(obj.i, ctx);
+        new_formatter<int>* nf = static_cast<new_formatter<int>*>(types[i].second.get());
+        out = nf->f.format(obj.i, ctx);
         break;
+      }
       case type::d:
+      {
         out = format_to(out, "d=");
-        out = double_formatter.format(obj.d, ctx);
+        new_formatter<double>* nf = static_cast<new_formatter<double>*>(types[i].second.get());
+        out = nf->f.format(obj.d, ctx);
         break;
+      }
       case type::c:
+      {
         out = format_to(out, "c=");
-        out = char_formatter.format(obj.c, ctx);
+        new_formatter<char>* nf = static_cast<new_formatter<char>*>(types[i].second.get());
+        out = nf->f.format(obj.c, ctx);
         break;
+      }
       case type::s:
+      {
         out = format_to(out, "s=");
-        out = string_formatter.format(obj.s, ctx);
+        new_formatter<string_view>* nf = static_cast<new_formatter<string_view>*>(types[i].second.get());
+        out = nf->f.format(obj.s, ctx);
         break;
+      }
       }
       if (i < types.size() - 1) out = format_to(out, ", ");
     }
@@ -152,6 +186,5 @@ int main() {
   print("MSVC version {}\n", _MSC_VER); // needs to be 1937 or higher
 
   Object obj{11, 2.0, '3', "four"};
-  println("{:s[]di[_^10x]}-", obj);
-  cout << format("{:s[]di[_^10x]}-", obj);
+  std::cout << format("{:s[]di[_^10x]}-", obj);
 }
