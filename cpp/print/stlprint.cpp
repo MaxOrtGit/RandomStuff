@@ -1,10 +1,9 @@
-
 #include <print>
 #include <string_view>
 #include <format>
 #include <vector>
-#include <ranges> // find
 #include <iostream>
+#include <variant>
 
 using namespace std;
 
@@ -24,7 +23,7 @@ struct Object {
 
 // it and ctx are modified
 template <typename T, typename CharT>
-constexpr formatter<T> parseFormatter(basic_format_parse_context<CharT>& ctx, auto& it)
+constexpr formatter<T, CharT> parseFormatter(basic_format_parse_context<CharT>& ctx, auto& it)
 {
   if (*it != '[') return formatter<T>();
   
@@ -53,28 +52,18 @@ constexpr formatter<T> parseFormatter(basic_format_parse_context<CharT>& ctx, au
 }
 
 
-
 // {} || {:} print all
 // letters tell what to print
 // {dis} print double, int, string
 // {i[format]} print int with format
 // {d[format]is[format]} prints double with format, int default, string with format
-template <>
-struct formatter<Object> {
+template <typename CharT>
+struct formatter<Object, CharT> {
 private:
   enum class type { i, d, c, s, none};
+  using FormatterVariant = std::variant<formatter<int, CharT>, formatter<double, CharT>, formatter<char, CharT>, formatter<string_view, CharT>>;
 
-  vector<type> types;
-
-  formatter<int> int_formatter;
-  formatter<double> double_formatter;
-  formatter<char> char_formatter;
-  formatter<string_view> string_formatter;
-
-  static constexpr bool in_vector(auto const& v, type e)
-  {
-    return ranges::find(v, e) != v.end();
-  }
+  vector<pair<type, FormatterVariant>> types;
 
 
 public:
@@ -90,24 +79,16 @@ public:
       switch (*it++)
       {
       case 'i':
-        if (in_vector(types, type::i)) throw format_error("Duplicate type");
-        types.push_back(type::i);
-        int_formatter = parseFormatter<int>(ctx, it);
+        types.emplace_back(type::i, parseFormatter<int>(ctx, it));
         break;
       case 'd':
-        if (in_vector(types, type::d)) throw format_error("Duplicate type");
-        types.push_back(type::d);
-        double_formatter = parseFormatter<double>(ctx, it);
+        types.emplace_back(type::d, parseFormatter<double>(ctx, it));
         break;
       case 'c':
-        if (in_vector(types, type::c)) throw format_error("Duplicate type");
-        types.push_back(type::c);
-        char_formatter = parseFormatter<char>(ctx, it);
+        types.emplace_back(type::c, parseFormatter<char>(ctx, it));
         break;
       case 's':
-        if (in_vector(types, type::s)) throw format_error("Duplicate type");
-        types.push_back(type::s);
-        string_formatter = parseFormatter<string_view>(ctx, it);
+        types.emplace_back(type::s, parseFormatter<string_view>(ctx, it));
         break;
       default:
         throw format_error("Unknown type");
@@ -121,23 +102,25 @@ public:
     auto out = format_to(ctx.out(), "Object: ");
     for (auto i = 0; i < types.size(); i++)
     {
-      switch (types[i])
+      auto &type = types[i].first;
+      auto &var = types[i].second;
+      switch (type)
       {
       case type::i:
         out = format_to(out, "i=");
-        out = int_formatter.format(obj.i, ctx);
+        out = get<formatter<int, CharT>>(var).format(obj.i, ctx);
         break;
       case type::d:
         out = format_to(out, "d=");
-        out = double_formatter.format(obj.d, ctx);
+        out = get<formatter<double, CharT>>(var).format(obj.d, ctx);
         break;
       case type::c:
         out = format_to(out, "c=");
-        out = char_formatter.format(obj.c, ctx);
+        out = get<formatter<char, CharT>>(var).format(obj.c, ctx);
         break;
       case type::s:
         out = format_to(out, "s=");
-        out = string_formatter.format(obj.s, ctx);
+        out = get<formatter<string_view, CharT>>(var).format(obj.s, ctx);
         break;
       }
       if (i < types.size() - 1) out = format_to(out, ", ");
@@ -152,6 +135,6 @@ int main() {
   print("MSVC version {}\n", _MSC_VER); // needs to be 1937 or higher
 
   Object obj{11, 2.0, '3', "four"};
-  println("{:s[]di[_^10x]}-", obj);
-  cout << format("{:s[]di[_^10x]}-", obj);
+  println("{:i}-", obj);
+  cout << format("{:s[]di[_^10x]i}-", obj);
 }
