@@ -73,7 +73,6 @@ public:
     if (it == end || *it == '}') {
       return it;
     }
-    int i = 0;
     while  (it != end && *it != '}')
     {
       switch (*it++)
@@ -93,13 +92,17 @@ public:
       default:
         throw format_error("Unknown type");
       }
-      i++;
     }
     return it;
   }
 
   auto format(const Object& obj, auto& ctx) {
     auto out = format_to(ctx.out(), "Object: ");
+    if (types.empty())
+    {
+      out = format_to(out, "i={}, d={}, c={}, s={}", obj.i, obj.d, obj.c, obj.s);
+      return out;
+    }
     for (auto i = 0; i < types.size(); i++)
     {
       auto &type = types[i].first;
@@ -129,12 +132,10 @@ public:
   }
 };
 
-
-
 int main() {
   print("MSVC version {}\n", _MSC_VER); // needs to be 1937 or higher
 
   Object obj{11, 2.0, '3', "four"};
-  println("{:i}-", obj);
-  cout << format("{:s[]di[_^10x]i}-", obj);
+  println("-{}-", obj);
+  println("-{:s[]di[_^10x]i}-", obj);
 }
