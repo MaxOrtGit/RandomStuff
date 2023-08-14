@@ -38,4 +38,4 @@ public:
 
 #define CLASSES_LIST ClassA, ClassB, ClassC, ClassD
 
-enum class Classes { CLASSES_LIST };
+enum class Classes {BaseClass = -1, None = 0, CLASSES_LIST };

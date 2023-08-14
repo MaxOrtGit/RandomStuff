@@ -40,20 +40,16 @@ auto constexpr MakeMapOfFunctions(int offset = 0)
   return _MakeMapOfFunctions_impl<T, Map, CLASSES_LIST>(offset);
 }
 
-// name, return type, (args){code}
-#define MakeGenericInstance(Name, ReturnType, ...) \
-struct Name \
-{ \
-  template <typename T> \
-  static constexpr ReturnType operator() \
-    __VA_ARGS__; \
-}; 
 
 // ------------------ Function to create an instance ------------------
-MakeGenericInstance(ConstructorInstance, std::unique_ptr<T>, 
-/*constexpr std::unique_ptr<T> ConstructorInstance*/(){
-  return std::make_unique<T>();
-})
+struct ConstructorInstance
+{
+  template<typename T>
+  static constexpr std::unique_ptr<T> operator()() 
+  {
+    return std::make_unique<T>();
+  }
+};
 
 // additional cases need to be added in a function body
 static constexpr std::unique_ptr<BaseClass> NoneClassConstructor()
@@ -65,10 +61,14 @@ auto constructors = MakeContainerOfFunctions<ConstructorInstance>();
 
 
 // ------------------ Function call color on an instance ------------------
-MakeGenericInstance(ColorInstance, void, 
-(int r, int g, int b) {
-  T::PrintColor(r, g, b);
-})
+struct ColorInstance 
+{
+  template<typename T>
+  static constexpr void operator()(int r, int g, int b) 
+  {
+    T::PrintColor(r, g, b);
+  }
+};
 
 static constexpr void BaseClassColorer(int r, int g, int b) 
 {

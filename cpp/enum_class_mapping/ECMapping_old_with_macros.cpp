@@ -48,12 +48,14 @@ std::unique_ptr<BaseClass> ConstructorInstance() {
 }
 CreateMapOfFunctions(constructors, ConstructorInstance)
 
+
 // ------------------ Function call color on an instance ------------------
 template<typename T>
 void ColorInstance(int r, int g, int b) {
   T::PrintColor(r, g, b);
 }
 CreateMapOfFunctions(colorers, ColorInstance)
+
 
 // ------------------ Setting up random ------------------
 
