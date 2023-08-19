@@ -1,11 +1,12 @@
 #include <iostream>
+#include <functional> // for std::function and std::mem_fn
 #include <vector>
-#include <functional>
-#include <memory>
-#include <random>
-#include <ctime>
 #include <unordered_map>
 #include <map>
+
+#include <memory>
+#include <random>
+#include <ctime> // for std::time for random
 #include "Classes.h"
 
 // ------------------ Functions for creating static calls ------------------
@@ -16,18 +17,25 @@ template <typename T, typename Base>
 concept HasCallOperator = requires {std::mem_fn(T::template operator()<Base>);};
 
 // MakeContainerOfCalls generic function (allows for passing of any Args)
+// Static call operator returns std::functions
+// Non-static call operator returns std::mem_fns
 template<typename Base, typename T, template <typename> class Container, typename ...Args>
 auto constexpr _MakeContainerOfCalls_Generic()
 {
-  if constexpr (HasStaticCallOperator<T, Base>) {
+  if constexpr (HasStaticCallOperator<T, Base>) 
+  {
+    // Static call operator
     using Func = decltype(std::function(T::template operator()<Base>));
     return Container<Func>{T::template operator()<Args>...};
   }
-  else if constexpr (HasCallOperator<T, Base>) {
+  else if constexpr (HasCallOperator<T, Base>) 
+  {
+    // Non-static call operator
     using Func = decltype(std::mem_fn(T::template operator()<Base>));
     return Container<Func>{std::mem_fn(T::template operator()<Args>)...};
   }
-  else {
+  else 
+  {
     static_assert(false, "T does not have a call operator");
   }
 }
@@ -37,22 +45,29 @@ template<typename T, template <typename> class Container = std::vector>
 auto constexpr MakeContainerOfCalls()
 {
   // automatically put CLASSES_LIST
-  return _MakeContainerOfCalls_Generic<BaseClass, T, std::vector, CLASSES_LIST>();
+  return _MakeContainerOfCalls_Generic<BaseClass, T, Container, CLASSES_LIST>();
 }
 
 // MakeMapOfCalls generic function (allows for passing of any Args)
+// Static call operator returns std::functions
+// Non-static call operator returns std::mem_fns
 template<typename Base, typename T, template <typename, typename> class Map, typename ...Args>
 auto constexpr _MakeMapOfCalls_Generic(int offset = 0)
 {
-  if constexpr (HasStaticCallOperator<T, Base>) {
+  if constexpr (HasStaticCallOperator<T, Base>) 
+  {
+    // Static call operator
     using Func = decltype(std::function(T::template operator()<Base>));
     return Map<Classes, Func>{ {static_cast<Classes>(offset++), (T::template operator()<Args>)}...};
   }
-  else if constexpr (HasCallOperator<T, Base>) {
+  else if constexpr (HasCallOperator<T, Base>) 
+  {
+    // Non-static call operator
     using Func = decltype(std::mem_fn(T::template operator()<Base>));
     return Map<Classes, Func>{ {static_cast<Classes>(offset++), std::mem_fn(T::template operator()<Args>)}...};
   }
-  else {
+  else 
+  {
     static_assert(false, "T does not have a call operator");
   }
 }
@@ -66,18 +81,7 @@ auto constexpr MakeMapOfCalls(int offset = 0)
 }
 
 
-// ------------------ Functions for creating calls ------------------
-
-// MakeContainerOfCalls generic function (allows for passing of any Args)
-template<typename Base, HasCallOperator<Base> T, template <typename> class Container, typename ...Args>
-auto constexpr _MakeContainerOfCalls_Generic()
-{
-  using Func = decltype(std::function(T::template operator()<Base>));
-  return Container<Func>{T::template operator()<Args>...};
-}
-
-
-// ------------------ Function to create an instance ------------------
+// ------------------ Functions to create an instance ------------------
 struct ConstructorInstance
 {
   template<typename T>
@@ -93,26 +97,27 @@ static constexpr std::unique_ptr<BaseClass> NoneClassConstructor()
   std::cout << "No Class" << std::endl;
   return nullptr;
 }
+
 auto constructors = MakeContainerOfCalls<ConstructorInstance>();
 
 
-// ------------------ Function call color on an instance ------------------
+// ------------------ Functions for call color on an instance ------------------
+template <typename T, typename... Args>
+concept ClassInArgs = (std::same_as<T, Args> || ...);
+
 template <typename T>
-concept IsCoolClass = std::is_same_v<T, ClassC> || std::is_same_v<T, ClassD>;
+concept IsCoolClass = ClassInArgs<T, ClassC, ClassD>;
 
 struct ColorInstance 
 {
   template<typename T>
-  static constexpr void operator()(int r, int g, int b) {
+  static constexpr void operator()(int r, int g, int b) 
+  {
     // override
     if constexpr (IsCoolClass<T>) {
       std::cout << "Cooler ";
-      T::PrintColor(g, b, r);
     }
-    else 
-    {
-      T::PrintColor(r, g, b);
-    }
+    T::PrintColor(g, b, r);
   }
 };
 
@@ -123,13 +128,7 @@ static constexpr void BaseClassColorer(int r, int g, int b)
 }
 static constexpr void NoneClassColorer(int r, int g, int b) 
 {
-  std::cout << "No Class" << std::endl;
-}
-template <typename T>
-static constexpr void CoolerClassColorer(int r, int g, int b) 
-{
-  std::cout << "Cooler ";
-  T::PrintColor(r, g, b);
+  std::cout << "No Class to print color" << std::endl;
 }
 
 // because Classes::None is 0, we need to offset it by 1 to the first class
@@ -138,7 +137,7 @@ auto colorers = MakeMapOfCalls<ColorInstance, std::map>(static_cast<int>(Classes
 // have to add new cases / overrides in a function body
 
 
-// ------------------ Function Set color ------------------
+// ------------------ Functions for set color ------------------
 // we manually  create functor so we can store values
 class ColorSetter {
 public:
@@ -151,15 +150,20 @@ public:
   constexpr void operator()() {
     T::PrintColor(r, g, b);
   }
+  
+  constexpr void BaseSet() {
+    std::cout << "BaseClass ";
+    BaseClass::PrintColor(r, g, b);
+  }
 
   constexpr void NoneSet() {
-    std::cout << "No Class" << std::endl;
+    std::cout << "No Class to color" << std::endl;
   }
 };
 
 // For ColorSetter we cant use the [] operator (because mem_fn has no default constructor)
 // instead we use the at() and insert(std::mem_fn(function)) functions
-auto setters = MakeMapOfCalls<ColorSetter>();
+auto setters = MakeMapOfCalls<ColorSetter>(static_cast<int>(Classes::ClassA));
 
 
 // ------------------ Setting up random ------------------
@@ -170,15 +174,15 @@ std::mt19937 rng(static_cast<unsigned>(std::time(0)));
 // ------------------ Adding new cases and overrides ------------------
 void AddOverrides() {
   // Add None constructor to the beginning of the vector
-  constructors.insert(constructors.begin(), NoneClassConstructor);
+  //constructors.insert(constructors.begin(), NoneClassConstructor);
 
   // Add new cases and overrides for colorers
-  colorers.insert(colorers.begin(), {Classes::BaseClass, NoneClassColorer});
-  colorers.insert(colorers.begin(), {Classes::BaseClass, BaseClassColorer});
+  colorers.insert({{Classes::None, NoneClassColorer}, {Classes::BaseClass, BaseClassColorer}});
 
-  setters.insert(setters.begin(), {Classes::None, std::mem_fn(ColorSetter::NoneSet)});
+  // Adding new case into setters
+  setters.insert({Classes::None, std::mem_fn(ColorSetter::NoneSet)});
+  setters.insert({Classes::BaseClass, std::mem_fn(ColorSetter::BaseSet)});
 }
-
 
 // ------------------ Using the containers and maps ------------------
 int main() {
@@ -207,7 +211,7 @@ int main() {
   setters.at(Classes::None)(color);
   setters.at(Classes::ClassA)(color);
   setters.at(Classes::ClassB)(color);
-  setters.at(Classes::ClassC)(color);
+  setters.at(Classes::BaseClass)(color);
   
   return 0;
 }
