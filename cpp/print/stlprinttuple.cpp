@@ -252,6 +252,12 @@ int main() {
   std::print("MSVC version {}\n", _MSC_VER); // needs to be 1937 or higher
 
   std::tuple<int, float, char, std::string_view, float, float> obj{11, 2.0, '%', "four", 1.2, 3.4};
+
+  constexpr auto func_ptrs = [&]<size_t... Is>(std::index_sequence<Is...>) {
+    return std::array{Is...};
+  };
+  std::cout << func_ptrs[0];
+
   std::println("-{:()[ ]}-", obj);
   std::println("-{:[ - ]3[], 0[_^10x], 1, 4, 5}-", obj);
 }
