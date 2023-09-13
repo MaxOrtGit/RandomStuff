@@ -7,6 +7,10 @@
 
 using json = nlohmann::json;
 
+class BaseC;
+
+std::unordered_map<std::string, std::function<void(json&, std::pair<std::type_index, std::unique_ptr<BaseC>>&)>> addComponent;
+
 namespace nlohmann {
   template <typename T>
   struct adl_serializer<std::unique_ptr<T>> {
@@ -31,25 +35,18 @@ namespace nlohmann {
       opt = std::type_index(typeid(j.get<std::string>()));
     }
   };
-  
-  template <typename T>
-  struct adl_serializer<std::pair<std::type_index, T>> {
-    // store T with a key of type_index.name()
-    static void to_json(json& j, const std::pair<std::type_index, T>& opt) {
-      j = json{{opt.first.name(), opt.second}};
+  template <>
+  struct adl_serializer<std::pair<std::type_index, std::unique_ptr<BaseC>>> {
+    static void to_json(json& j, const std::pair<std::type_index, std::unique_ptr<BaseC>>& componentPair) {
+      j = json{ {componentPair.first.name(), componentPair.second} };
     }
-    static void from_json(const json& j, std::pair<std::type_index, T>& opt) {
-      opt.first = std::type_index(typeid(T));
-      opt.second = j.begin().value().get<T>();
+    static std::pair<std::type_index, std::unique_ptr<BaseC>> from_json(const json& j, std::pair<std::type_index, std::unique_ptr<BaseC>>& componentPair) {
+      return { std::type_index(typeid(BaseC)), j.begin().value().get<std::unique_ptr<BaseC>>() };
     }
   };
-  
 }
 
 
-class BaseC;
-
-std::unordered_map<std::string, std::function<void(json&, std::vector<std::unique_ptr<BaseC>>&)>> addComponent;
 class BaseC
 {
 public:
@@ -131,11 +128,9 @@ struct AddComponentInstance
   // this version of MSVC doesn't have static call operators cus it is dumb
   // remind Max later to check if he can make it a call operator
   template <typename T>
-  constexpr static void Run(json& j, std::vector<std::unique_ptr<BaseC>>& entity)
+  constexpr static void Run(json& j, std::pair<std::type_index, std::unique_ptr<BaseC>>& pair)
   {
-    std::unique_ptr<T> c = std::make_unique<T>();
-    from_json(j, *c);
-    entity.emplace_back(std::move(c));
+    //nlohmann::from_json(j, componentPair);
   }
 };
 
@@ -158,5 +153,15 @@ int main()
 
   json j2 = vec3;
   std::cout << j2 << std::endl;
+
+  std::pair<std::type_index, std::unique_ptr<BaseC>> p{std::type_index(typeid(Class11)), std::make_unique<Class11>(1, 2.0f) };
+
+  json j3 = p;
+  std::cout << j3 << std::endl;
+
+  std::pair<std::type_index, std::unique_ptr<BaseC>> p2 = {typeid(nullptr), nullptr};
+
+  nlohmann::from_json(j3, p2);
+  
   return 0;
 }
