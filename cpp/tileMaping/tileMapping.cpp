@@ -1,56 +1,136 @@
 #include <iostream>
 #include <bitset>
+#include <array>
 
 
 template <int... I>
-bool AllTrue(std::bitset<8>& neighbors)
+consteval bool AllTrue(std::bitset<8>& neighbors)
 {
   return (neighbors[I % 8] && ...);
 }
 
 
 template <int... I>
-bool AnyRotation(std::bitset<8>& neighbors)
+consteval bool AnyRotation(std::bitset<8>& neighbors)
 {
-  return AllTrue<I...>(neighbors)     || AllTrue<(I + 2)...>(neighbors) || 
-         AllTrue<(I + 4)...>(neighbors) || AllTrue<(I + 6)...>(neighbors);
+    if (AllTrue<I...>(neighbors)) return 1;
+    if (AllTrue<(I + 2)...>(neighbors)) return 2;
+    if (AllTrue<(I + 4)...>(neighbors)) return 3;
+    if (AllTrue<(I + 6)...>(neighbors)) return 4;
+    return 0; // Return 0 if none of the conditions are met
 }
 
-int main()
+
+consteval std::array<int, 256> GetPermutation()
 {
-  int j = 0;
-  // create a loop that gives every posible std::bitset<8>
+  std::array<int, 256> permutations {};
   for (int i = 0; i < 256; i++)
   {
     std::bitset<8> n(i);
-    if (n[1] && n[6] || n[3] && n[4] || // opposites
-        AnyRotation<1, 3, 6>(n) || // 2 edge one corner
-        AnyRotation<0, 2, 5>(n) || 
-        n[0] && n[2] && n[4] && n[6])
-    {continue;}
+    // Full Blocks
+    if (int x = AnyRotation<1, 5>(n))
+    {
+      permutations[i] = 16;
+      continue;
+    }
+    if (int x = AnyRotation<1, 3, 6>(n))
+    {
+      permutations[i] = 16;
+      continue;
+    }
+    if (int x = AnyRotation<0, 2, 5>(n))
+    {
+      permutations[i] = 16;
+      continue;
+    }
+    if (int x = AnyRotation<0, 2, 4, 6>(n))
+    {
+      permutations[i] = 16;
+      continue;
+    }
 
     // L pieces
-    if (AnyRotation<1, 3>(n) || AnyRotation<0, 3>(n) || AnyRotation<0, 5>(n) || 
-        AnyRotation<0, 2, 4>(n) || AnyRotation<0, 2, 3>(n) || AnyRotation<1, 2, 4>(n) ||
-        AnyRotation<2, 5, 4>(n))
-    {continue;}
+    if (int x = AnyRotation<1, 3>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
+    if (int x = AnyRotation<0, 3>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
+    if (int x = AnyRotation<0, 5>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
+    if (int x = AnyRotation<0, 2, 4>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
+    if (int x = AnyRotation<0, 2, 3>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
+    if (int x = AnyRotation<1, 2, 4>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
+    if (int x = AnyRotation<2, 4, 5>(n))
+    {
+      permutations[i] = 11 + x;
+      continue;
+    }
 
     // Edge pieces
-    if (AnyRotation<1>(n) || AnyRotation<0, 1>(n) || AnyRotation<1, 2>(n) || AnyRotation<0, 2>(n))
-    {continue;
+    if (int x = AnyRotation<1>(n))
+    {
+      permutations[i] = 7 + x;
+      continue;
+    }
+    if (int x = AnyRotation<0, 1>(n))
+    {
+      permutations[i] = 7 + x;
+      continue;
+    }
+    if (int x = AnyRotation<1, 2>(n))
+    {
+      permutations[i] = 7 + x;
+      continue;
+    }
+    if (int x = AnyRotation<0, 2>(n))
+    {
+      permutations[i] = 7 + x;
+      continue;
     }
 
     // 2 corner pieces
-    if (AnyRotation<0, 4>(n))
-    {continue;
+    if (int x = AnyRotation<0, 4>(n))
+    {
+      permutations[i] = 3 + x;
+      continue;
     }
 
+
     // 1 corner pieces
-    if (AnyRotation<0>(n))
-    {continue;
+    if (int x = AnyRotation<0>(n))
+    {
+      permutations[i] = x - 1;
+      continue;
     }
-    std::cout << n << std::endl;
-    j++;
+    permutations[i] = -1;
   }
-  std::cout << j << std::endl;
+  return permutations;
+}
+
+constexpr std::array<int, 256> permutations = GetPermutation();
+
+
+
+int main()
+{
 }
