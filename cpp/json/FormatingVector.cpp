@@ -15,7 +15,8 @@ namespace nlohmann
     static void to_json(json& j, const std::vector<std::pair<std::string, std::string>>& opt) {
       for (auto& p : opt)
       {
-        j[p.first] = p.second;
+        std::cout << "emplacing " << p.first << " " << p.second << std::endl;
+        j.emplace(p.first, p.second);
       }
     }
     static void from_json(const json& j, std::vector<std::pair<std::string, std::string>>& opt) {
@@ -43,6 +44,16 @@ int main()
   for (auto& p : v2)
   {
     std::cout << p.first << " " << p.second << std::endl;
+  }
+
+  // parse a string as json
+  std::string s = "{\"a\":\"b\",\"c\":\"d\",\"a\":\"d\"}";
+  json j2 = json::parse(s);
+  std::cout << j2 << std::endl;
+  // iterate the json
+  for (auto& [key, value] : j2.items())
+  {
+    std::cout << key << " " << value << std::endl;
   }
   return 0;
 }
