@@ -3,26 +3,23 @@
 #include "imgui.h"
 #include <ranges>
 
-using namespace std::meta;
-
 using json = nlohmann::ordered_json;
-
 
 
 // ----------------Pre Declarations----------------
 template <typename DataType>
-void RunObjectImGuiEditorInterface(DataType& object)
+void RunObjectImGuiEditorInterface(DataType& object);
 
 
 // ----------------Property marking code----------------
 template <typename DataType>
-using ToJsonFunc = void (*)(json& j, const DataType&);
+using ToJsonFunc = void (*)(json&, const DataType&);
 
 template <typename DataType>
-using FromJsonFunc = void (*)(const json& j, DataType&);
+using FromJsonFunc = void (*)(const json&, DataType&);
 
 template <typename DataType>
-using EditorFunc = void (*)(DataType&);
+using EditorFunc = void (*)(DataType&, const std::meta::info&);
 
 
 template <typename DataType>
@@ -33,17 +30,20 @@ struct PropertyOptions
   // explicit dontSerialize option
   bool dontSerialize = false;
 
-  bool editor = true;
+  // explicit editable option
+  bool editable = true;
+  // explicit nonEditable option
+  bool nonEditable = true;
 
-  ToJsonFunc<DataType> toJsonFunc = [](DataType dataType)
+  ToJsonFunc<DataType> toJsonFunc = [](json& j, const DataType& dataType) constexpr
   {
-    j[display_name_of(^dataType)] = dataType;
+    j[std::meta::display_name_of(^dataType)] = dataType;
   };
-  FromJsonFunc<DataType> fromJsonFunc = [](DataType dataType)
+  FromJsonFunc<DataType> fromJsonFunc = [](const json& j, DataType& dataType) constexpr
   {
-    dataType = j.value(display_name_of(^dataType), dataType);
+    dataType = j.value(std::meta::display_name_of(^dataType), dataType);
   };
-  EditorFunc<DataType> editorFunc = RunObjectImGuiEditorInterface;
+  EditorFunc<DataType> editorFunc = nullptr;
 };
 
 template<typename DataType, PropertyOptions<DataType> Options = PropertyOptions<DataType>{}>
@@ -53,7 +53,7 @@ using Property = DataType;
 template <typename T, typename Arg>
 consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::function<bool(info)> conditionFunc = nullptr)
 {
-  template for (constexpr auto member : nonstatic_data_members_of(^T))
+  template for (constexpr auto member : std::meta::nonstatic_data_members_of(^T))
   {
     if constexpr (conditionFunc && !conditionFunc(member))
     {
@@ -74,15 +74,15 @@ consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::
 
 consteval auto GetPropertyOptions(const info& member)
 {
-  constexpr auto defaultOptions = PropertyOptions<typename[:type_of(member):]>{};
+  constexpr auto defaultOptions = PropertyOptions<typename[:std::meta::type_of(member):]>{};
 
   // Has to be a template of Property
-  if (template_of(type_of(member)) != ^Property)
+  if (std::meta::template_of(std::meta::type_of(member)) != ^Property)
   {
     return defaultOptions;
   }
   // Has to have 2 template arguments and the second one has to be PropertyOptions
-  constexpr auto templateArgs = template_arguments_of(type_of(member));
+  constexpr auto templateArgs = std::meta::template_arguments_of(std::meta::type_of(member));
   if constexpr (!(templateArgs.size() == 2 && templateArgs[1] == ^PropertyOptions>))
   {
     return defaultOptions;
@@ -90,80 +90,79 @@ consteval auto GetPropertyOptions(const info& member)
   return [:templateArgs[1]:];
 }
 
+struct GenerateProperties
+{
+  bool normalMembers = true;
+  bool explicitTrueMembers = true;   // Should basically always be true
+  bool explicitFalseMembers = false; // Should basically always be false
+  
+//TODO flags for public vs private
+};
 
 
 // ------------------------------------------------
 // -----------------Serialize Code-----------------
 // ------------------------------------------------
 
-
-
-// ----------------Serialize flag Code----------------
-struct SerializeFlags
-{
-  bool serializeNormalMembers = true;
-  bool serializeSerializeMembers = true; // Should basically always be true
-  bool serializeDontSerializeMembers = false;
-};
-
-template <SerializeFlags serializeFlags>
-bool SerializeConditionFunc(info member)
+// ----------------Serialize property Code----------------
+template <GenerateProperties serializeProperties>
+bool SerializeConditionFunc(std::meta::info member)
 {
   PropertyOptions options = GetPropertyOptions(member);
   if constexpr (options.serialize)
-    return serializeFlags.serializeSerializeMembers;
+    return serializeProperties.explicitMembers;
     
   if constexpr (options.dontSerialize)
-    return serializeFlags.serializeDontSerializeMembers;
+    return serializeProperties.explicitFalseMembers;
 
-  return serializeFlags.serializeNormalMembers;
+  return serializeProperties.normalMembers;
 }
 
 
 // ----------------Serialize Run Code----------------
-template <SerializeFlags serializeFlags, typename T>
+template <GenerateProperties serializeProperties, typename T>
 void ToJsonAllMembers(json& j, const T& object)
 {
   RunFuncOnAllNSDM(object, [&](auto& member)
   {
     if constexpr (GetPropertyOptions(member))
     {
-      template_arguments_of(typeof(member))[1].toJsonFunc(j, object.[:member:]);
+      std::meta::template_arguments_of(std::meta::typeof(member))[1].toJsonFunc(j, object.[:member:]);
     }
     else
     {
       DefaultToJson(j, object.[:member:]);
     }
-  }, SerializeConditionFunc<serializeFlags>);
+  }, SerializeConditionFunc<serializeProperties>);
 }
 
-template <SerializeFlags serializeFlags, typename T>
+template <GenerateProperties serializeProperties, typename T>
 void FromJsonAllMembers(const json& j, T& object)
 {
   RunFuncOnAllNSDM(object, [&](auto& member)
   {
     if constexpr (GetPropertyOptions(member))
     {
-      template_arguments_of(typeof(member))[1].fromJsonFunc(j, object.[:member:]);
+      std::meta::template_arguments_of(std::meta::typeof(member))[1].fromJsonFunc(j, object.[:member:]);
     }
     else
     {
       DefaultFromJson(j, object.[:member:]);
     }
-  }, SerializeConditionFunc<serializeFlags>);
+  }, SerializeConditionFunc<serializeProperties>);
 }
 
 // ----------------Serialize Macros----------------
-#define JSON_SERIALIZE_AUTO_FLAGS(class, serializeFlags)\
+#define JSON_SERIALIZE_AUTO_FLAGS(class, serializeProperties)\
 friend void to_json(json& j, const class& object)\
 {\
-  ToJsonAllMembers<serializeFlags>(j, object);\
+  ToJsonAllMembers<serializeProperties>(j, object);\
 }\
 friend void from_json(const json& j, class& object)\
 {\
-  FromJsonAllMembers<serializeFlags>(j, object);\
+  FromJsonAllMembers<serializeProperties>(j, object);\
 }
-#define JSON_SERIALIZE_AUTO(class) JSON_SERIALIZE_AUTO_FLAGS(class, SerializeFlags{})
+#define JSON_SERIALIZE_AUTO(class) JSON_SERIALIZE_AUTO_FLAGS(class, SerializeProperties{})
 
 
 // -----------------------------------------------
@@ -196,115 +195,147 @@ consteval ImGuiDataType MapTypeToImGuiDataType()
   return ImGuiDataType_COUNT;  // Default case, you can handle this appropriately
 }
 
+template <GenerateProperties editorProperties>
+bool EditorConditionFunc(std::meta::info member)
+{
+  PropertyOptions options = GetPropertyOptions(member);
+  if constexpr (options.editable)
+    return editorProperties.explicitMembers;
+    
+  if constexpr (options.dontSerialize)
+    return editorProperties.explicitFalseMembers;
+
+  return editorProperties.normalMembers;
+}
+
+// ----------------Editor Functions----------------
+
+// Default editor for all types
+template <typename DataType>
+struct EditorProperties
+{
+  // default EditorFunc is general for numeric and floating point types and gives a No editor implemented for other types
+  static void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+  {
+    // For all not specialized (std::string, bool, int, float, etc.)
+    if (!objectInfo.is_nsdm())
+    {
+      ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
+    }
+
+    // General for all numeric and floating point types
+    constexpr ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
+    constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<DataType>();
+    if constexpr (dataType != ImGuiDataType_COUNT)
+    {
+      constexpr std::string imGuiName = std::string("##") + std::meta::display_name_of(objectInfo);
+      ImGui::InputScalar(imGuiName.c_str(), ScalarInput(dataType), &val, nullptr, nullptr, nullptr, flags)
+    }
+    else
+    {
+      // No editor implemented
+      consteval std::string msg = "No editor implemented for type: " + display_name_of(^T);
+      ImGui::Text(msg.c_str());
+    }
+  }
+};
+
+
+// Specialized editor for lists
 template <typename T>
 concept Iterable = requires(T t) 
 {
   std::begin(t); // must have a begin function
   std::end(t);   // must have an end function
 };
-
+template <Iterable DataType>
 struct EditorProperties
 {
-  bool isOpen = false;
+  static void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+  {
+    if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+    {
+      int i = 0;
+      for (auto& val : object)
+      {
+        // for list of pairs (because pairs are most likely to be maps or map-like)
+        if constexpr (std::is_convertible_v<decltype(val.first), std::string>)
+        {
+          //TODO: make editing the first value not close the dropdown
+          if(ImGui::TreeNodeEx(static_cast<std::string>(val.first).c_str(), ImGuiTreeNodeFlags_AllowItemOverlap))
+          {
+            RunObjectImGuiEditorInterface(val.first, std::meta::info{});
+            RunObjectImGuiEditorInterface(val.second, std::meta::info{});
+            ImGui::TreePop();
+          }
+        }
+        else
+        {
+          RunObjectImGuiEditorInterface(val, std::meta::info{});
+          i++;
+        }
+      }
+      
+      ImGui::TreePop();
+    }
+  }
 };
 
-// might need to split into a bool and this one for if constexpr
-template <typename DataType>
-constexpr std::optional<EditorProperties&> GetEditorProperties(DataType& object)
+
+template <GenerateProperties editorProperties, typename DataType>
+void RunObjectImGuiEditorInterface(DataType& object, const std::meta::info& objectInfo)
 {
-  template for (constexpr auto member : members(^T, is_static, is_variable))
+  // If the object is a Property
+  if constexpr (std::meta::template_of(std::meta::type_of(objectInfo)) == ^Property)
   {
-    if constexpr (type_of(member) == ^EditorProperties)
+    // And the Property has an editorFunc
+    constexpr auto options = GetPropertyOptions(objectInfo);
+    if constexpr (GetPropertyOptions(objectInfo).editorFunc)
     {
-      return object.[:member:];
+      options.editorFunc(objectInfo, objectInfo);
+      return;
     }
   }
-  return std::nullopt;
-}
-
-template <typename DataType>
-void DefaultRangeInterface(DataType& object, std::string_view name)
-{
-  if constexpr(std::optional<EditorProperties&> properties = GetEditorProperties(object))
-  {
-    if (properties->isOpen)
-    {
-      ImGui::SetNextItemOpen(true);
-    }
-  }
-
-  bool open = ImGui::TreeNodeEx(name.data(), ImGuiTreeNodeFlags_AllowItemOverlap);
-  // TODO: Add drop down bar cases
   
-  // If not open return
-  if (!open) return;
-
-  int i = 0;
-  for (auto& val : object)
-  {
-    // TODO: Add drop down start cases
-    RunImGuiValueInterface(val);
-  }
-  
-  ImGui::TreePop();
+  // else run the default editor
+  EditorProperties<DataType>::EditorFunc(object, objectInfo);
 }
 
-
-template <typename DataType>
-void RunImGuiValueInterface(DataType& object, info member)
+template <GenerateProperties editorProperties, typename DataType>
+void GenerateObjectImGuiEditorInterface(DataType& object, const std::meta::info& objectInfo)
 {
-  // If it is an object with an editor properties
-  if constexpr (GetEditorProperties(object))
+  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
   {
-    RunFuncOnAllNSDM cv()
-  }
-
-  // If it is a range call the range interface
-  if constexpr (Iterable<DataType>)
-  {
-    DefaultRangeInterface(val, );
-    return;
-  }
-
-  // For all not specialized (std::string, bool, int, float, etc.)
-  if (is_variable(^object))
-  {
-    ImGui::Text(display_name_of(^object).c_str());
-  }
-
-  constexpr std::string imGuiName = std::string("##") + display_name_of(^T);
-  constexpr ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
-  constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<DataType>();
-  if constexpr (dataType != ImGuiDataType_COUNT)
-  {
-    ImGui::InputScalar(imGuiName.c_str(), ScalarInput(dataType), &val, nullptr, nullptr, nullptr, flags)
-  }
-  else if constexpr (std::is_same_v<DataType, std::string>)
-  {
-    ImGui::InputText(imGuiName.c_str(), &val, flags)
-  }
-  else if constexpr (std::is_same_v<DataType, bool>)
-  {
-    ImGui::SameLine();
-    ImGui::Checkbox(imGuiName.c_str(), &val)
-  }
-}
-
-
-
-
-template <typename DataType>
-void RunObjectImGuiEditorInterface(DataType& object)
-{
-  // If it is an object with an editor properties
-  if constexpr (GetEditorProperties(object))
-  {
-    RunFuncOnAllNSDM(object, [&](info member)
+    RunFuncOnAllNSDM(object, [&](const std::meta::info& objectInfo)
     {
-      if constexpr (is_variable(member))
-      {
-        RunImGuiValueInterface(object, member);
-      }
-    });
+      RunImGuiValueInterface(object, member);
+    }, EditorConditionFunc<editorProperties>);
+    ImGui::TreePop();
   }
 }
+
+#define EDITOR_AUTO_FLAGS(class, editorProperties)\
+template <>\
+struct EditorProperties<class>\
+{\
+  static void EditorFunc(class& object, const std::meta::info& objectInfo)\
+  {\
+    GenerateObjectImGuiEditorInterface<editorProperties>(object)\
+  }\
+};
+
+#define EDITOR_AUTO(class) EDITOR_AUTO_FLAGS(class, GenerateProperties{})
+
+
+// -----------------------------------------
+// ------------------Both-------------------
+// -----------------------------------------
+
+#define PROPERTY_AUTO_BOTH_FLAGS(class, serializeProperties, editorProperties)\
+JSON_SERIALIZE_AUTO_FLAGS(class, serializeProperties)\
+EDITOR_AUTO_FLAGS(class, editorProperties)
+
+#define PROPERTY_AUTO_FLAGS(class, properties) PROPERTY_AUTO_BOTH_FLAGS(class, properties, properties)
+
+#define PROPERTY_AUTO(class) PROPERTY_AUTO_FLAGS(class, GenerateProperties{})
+

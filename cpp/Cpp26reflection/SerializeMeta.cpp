@@ -17,14 +17,15 @@ constexpr PropertyOptions<float> radianSerializeToDegrees
   {
     radians = j.value(display_name_of(^dataType), radians) * 3.14159265358979323846f / 180;
   }
+  .editorFunc = [](float& radians)
+  {
+  }
 };
 
 constexpr PropertyOptions<FloatVec2> dontSerialize
 {
   .serialize = false
 };
-
-
 
 
 struct FloatVec2
