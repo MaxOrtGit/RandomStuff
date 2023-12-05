@@ -46,12 +46,16 @@ struct PropertyOptions
   EditorFunc<DataType> editorFunc = nullptr;
 };
 
-template<typename DataType, PropertyOptions<DataType> Options = PropertyOptions<DataType>{}>
+template<typename DataType, PropertyOptions<DataType> Options = PropertyOptions<DataType>{}, auto... Tags>
 using Property = DataType;
+
+// Overload for if you need extra parameters but don't want to specify the options
+template <typename DataType, auto... Tags>
+using PropertyDefault = Property<DataType, PropertyOptions<DataType>{}, Tags...>;
 
 // can provide a function that either calls on the member or the member info
 template <typename T, typename Arg>
-consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::function<bool(info)> conditionFunc = nullptr)
+consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::function<bool(std::meta::info)> conditionFunc = nullptr)
 {
   template for (constexpr auto member : std::meta::nonstatic_data_members_of(^T))
   {
@@ -61,7 +65,7 @@ consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::
     }
     
     // if the type of Arg is info
-    if constexpr (std::is_same_v<Arg, info>)
+    if constexpr (std::is_same_v<Arg, std::meta::info>)
     {
       func(member);
     }
@@ -72,32 +76,58 @@ consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::
   }
 }
 
-consteval auto GetPropertyOptions(const info& member)
+template <typename T>
+consteval T GetTemplateArg(const std::meta::info& member)
 {
-  constexpr auto defaultOptions = PropertyOptions<typename[:std::meta::type_of(member):]>{};
-
-  // Has to be a template of Property
-  if (std::meta::template_of(std::meta::type_of(member)) != ^Property)
-  {
-    return defaultOptions;
-  }
-  // Has to have 2 template arguments and the second one has to be PropertyOptions
   constexpr auto templateArgs = std::meta::template_arguments_of(std::meta::type_of(member));
-  if constexpr (!(templateArgs.size() == 2 && templateArgs[1] == ^PropertyOptions>))
+  template for (constexpr auto arg : templateArgs)
   {
-    return defaultOptions;
+    if constexpr (std::meta::template_of(std::meta::type_of(arg)) == ^T)
+    {
+      return arg;
+    }
   }
-  return [:templateArgs[1]:];
+  return {};
+}
+
+template <auto... Args>
+using HelperClass = int;
+
+template <typename T, auto... Args>
+consteval T GetTemplateArg()
+{
+  using Helper = HelperClass<Args...>;
+
+  template for (constexpr auto arg : std::meta::template_arguments_of(^Helper))
+  {
+    if constexpr (std::meta::type_of(arg) == ^T)
+    {
+      return arg;
+    }
+  }
+  return {};
+}
+
+consteval auto GetPropertyOptions(const std::meta::info& member)
+{
+  return GetTemplateArg<PropertyOptions<typename[:std::meta::type_of(member):]>>(member);
 }
 
 struct GenerateProperties
 {
-  bool normalMembers = true;
+  bool publicMembers = true;
+  bool privateMembers = true; // Includes protected
   bool explicitTrueMembers = true;   // Should basically always be true
   bool explicitFalseMembers = false; // Should basically always be false
-  
-//TODO flags for public vs private
 };
+
+// ----------------Property Tags----------------
+enum class ClassFormat
+{
+  Struct,
+  Array,
+};
+
 
 
 // ------------------------------------------------
@@ -105,69 +135,93 @@ struct GenerateProperties
 // ------------------------------------------------
 
 // ----------------Serialize property Code----------------
-template <GenerateProperties serializeProperties>
+template <GenerateProperties generateProperties>
 bool SerializeConditionFunc(std::meta::info member)
 {
   PropertyOptions options = GetPropertyOptions(member);
   if constexpr (options.serialize)
-    return serializeProperties.explicitMembers;
+    return generateProperties.explicitMembers;
     
   if constexpr (options.dontSerialize)
-    return serializeProperties.explicitFalseMembers;
-
-  return serializeProperties.normalMembers;
+    return generateProperties.explicitFalseMembers;
+  
+  // normal members
+  if constexpr (std::meta::is_public(member))
+    return generateProperties.publicMembers;
+  
+  // private and protected members
+  return generateProperties.privateMembers;
 }
 
 
-// ----------------Serialize Run Code----------------
-template <GenerateProperties serializeProperties, typename T>
-void ToJsonAllMembers(json& j, const T& object)
+// ----------------Serialize Main Functions Code----------------
+template <GenerateProperties generateProperties, auto... Tags>
+void ToJsonAllMembers(json& j, const auto& object)
 {
-  RunFuncOnAllNSDM(object, [&](auto& member)
+  RunFuncOnAllNSDM(object, [&](const std::meta::info& member)
   {
     if constexpr (GetPropertyOptions(member))
     {
       std::meta::template_arguments_of(std::meta::typeof(member))[1].toJsonFunc(j, object.[:member:]);
     }
+    else if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array)
+    {
+      j.push_back(dataType.[:member:]);
+    }
     else
     {
-      DefaultToJson(j, object.[:member:]);
+      j[std::meta::display_name_of(member)] = object.[:member:];
     }
-  }, SerializeConditionFunc<serializeProperties>);
+  }, SerializeConditionFunc<generateProperties>);
 }
 
-template <GenerateProperties serializeProperties, typename T>
-void FromJsonAllMembers(const json& j, T& object)
+template <GenerateProperties generateProperties, auto... Tags>
+void FromJsonAllMembers(const json& j, auto& object)
 {
-  RunFuncOnAllNSDM(object, [&](auto& member)
+  int i = 0;
+  RunFuncOnAllNSDM(object, [&](const std::meta::info& member)
   {
     if constexpr (GetPropertyOptions(member))
     {
       std::meta::template_arguments_of(std::meta::typeof(member))[1].fromJsonFunc(j, object.[:member:]);
     }
+    else if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array)
+    {
+      j.at(i++).get_to(object.[:member:]);
+    }
     else
     {
-      DefaultFromJson(j, object.[:member:]);
+      object.[:member:] = j.value(std::meta::display_name_of(member), object.[:member:]);
     }
-  }, SerializeConditionFunc<serializeProperties>);
+  }, SerializeConditionFunc<generateProperties>);
 }
 
 // ----------------Serialize Macros----------------
-#define JSON_SERIALIZE_AUTO_FLAGS(class, serializeProperties)\
+#define JSON_SERIALIZE_AUTO_FLAGS(class, generateProperties, ...)\
 friend void to_json(json& j, const class& object)\
 {\
-  ToJsonAllMembers<serializeProperties>(j, object);\
+  ToJsonAllMembers<generateProperties, __VA_ARGS__>(j, object);\
 }\
 friend void from_json(const json& j, class& object)\
 {\
-  FromJsonAllMembers<serializeProperties>(j, object);\
+  FromJsonAllMembers<generateProperties, __VA_ARGS__>(j, object);\
 }
-#define JSON_SERIALIZE_AUTO(class) JSON_SERIALIZE_AUTO_FLAGS(class, SerializeProperties{})
+#define JSON_SERIALIZE_AUTO(class, ...) JSON_SERIALIZE_AUTO_FLAGS(class, GenerateProperties{}, __VA_ARGS__)
 
 
 // -----------------------------------------------
 // ------------------Editor Code------------------
 // -----------------------------------------------
+
+// ----------------Editor Tags----------------
+enum class DropDownLabel
+{
+  Index, // default
+  Key,
+  Value
+};
+
+// ----------------Editor Utils----------------
 template <typename T>
 consteval ImGuiDataType MapTypeToImGuiDataType() 
 {
@@ -194,6 +248,15 @@ consteval ImGuiDataType MapTypeToImGuiDataType()
 
   return ImGuiDataType_COUNT;  // Default case, you can handle this appropriately
 }
+template <typename T>
+consteval std::string_view MapNumberTypeToFormatString() 
+{
+  if constexpr (std::is_integral_v<T>)
+    return "%d";
+  else if constexpr (std::is_floating_point_v<T>)
+    return "%g";
+  return ""; // If not a number type
+}
 
 template <GenerateProperties editorProperties>
 bool EditorConditionFunc(std::meta::info member)
@@ -202,86 +265,362 @@ bool EditorConditionFunc(std::meta::info member)
   if constexpr (options.editable)
     return editorProperties.explicitMembers;
     
-  if constexpr (options.dontSerialize)
+  if constexpr (options.nonEditable)
     return editorProperties.explicitFalseMembers;
 
-  return editorProperties.normalMembers;
+  // normal members
+  if constexpr (std::meta::is_public(member))
+    return generateProperties.publicMembers;
+  
+  // private and protected members
+  return generateProperties.privateMembers;
+}
+
+// ----------------Editor Number Field----------------
+// for all numeric and floating point types
+template <typename DataType>
+bool EditorNumberField(DataType& number, const std::meta::info& objectInfo)
+{
+  constexpr ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
+  constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<DataType>();
+
+  if constexpr (dataType != ImGuiDataType_COUNT)
+  {
+    constexpr std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+    ImGui::InputScalar(imGuiName.c_str(), ScalarInput(dataType), &val, nullptr, nullptr, nullptr, flags)
+  }
+
+  return dataType != ImGuiDataType_COUNT;
+}
+
+// for classes with all numeric/floating point types
+template <typename DataType>
+consteval bool IsAllSameNumeric()
+{
+  ImGuiDataType dataType = static_cast<ImGuiDataType>(-1);
+  // loop through all members
+  template for (constexpr auto member : std::meta::nonstatic_data_members_of(^DataType))
+  {
+    // If it is the first member set the dataType
+    if (dataType == static_cast<ImGuiDataType>(-1))
+    {
+      dataType = MapTypeToImGuiDataType<std::meta::typeof(member)>();
+    }
+    // If the dataType of the member is not the same as the first member return false
+    else if (dataType != MapTypeToImGuiDataType<typename[:std::meta::typeof(member):]>())
+    {
+      return false;
+    }
+  }
+
+  // If it is a valid dataType return true
+  return dataType != ImGuiDataType_COUNT;
+}
+
+// for classes with all the same numeric/floating point types
+template <typename DataType>
+concept AllSameNumeric = IsAllSameNumeric<DataType>();
+
+
+// if all members are the same numeric type then it will be an array of pointers to the same value
+template <GenerateProperties editorProperties = GenerateProperties{}>
+void EditorArrayOfValuesField(AllSameNumeric auto& object, const std::meta::info& objectInfo)
+{
+  using DataType = decltype(object);
+  using ValueType = typename[:GetFirstMember(objectInfo):];
+
+  // array of pointers to the same value
+  std::array<ValueType*, GetMemberCount(objectInfo)> pointerVec;
+  
+  RunFuncOnAllNSDM(object, [&](const std::meta::info& objectInfo)
+  {
+    pointerVec.push_back(&object.[:member:]);
+  }, EditorConditionFunc<editorProperties>);
+
+  constexpr std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+  constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<ValueType>();
+  void** data = reinterpret_cast<void**>(pointerArray.data());
+  int size = static_cast<int>(pointerArray.size());
+  constexpr std::string_view formatTag = MapNumberTypeToFormatString<ValueType>();
+  constexpr ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
+
+  ImGui::InputScalarNPTR(imGuiName.c_str(), dataType, data, size, 0, 0, formatTag.data(), ImGuiInputTextFlags_EnterReturnsTrue);
+}
+
+template <GenerateProperties editorProperties = GenerateProperties{}>
+void EditorStructFields(DataType auto& object, const std::meta::info& objectInfo)
+{
+  RunFuncOnAllNSDM(object, [&](const std::meta::info& member)
+  {
+    RunObjectImGuiEditorInterface(object.[:member:], member);
+  }, EditorConditionFunc<editorProperties>);
 }
 
 // ----------------Editor Functions----------------
 
-// Default editor for all types
+// Default EditorFunc is general for numeric and floating point types and gives a No editor implemented for other types
 template <typename DataType>
-struct EditorProperties
+void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 {
-  // default EditorFunc is general for numeric and floating point types and gives a No editor implemented for other types
-  static void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+  // For all not specialized (std::string, bool, int, float, etc.)
+  if (!objectInfo.is_nsdm())
   {
-    // For all not specialized (std::string, bool, int, float, etc.)
-    if (!objectInfo.is_nsdm())
-    {
-      ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
-    }
+    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
+  }
 
-    // General for all numeric and floating point types
-    constexpr ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue;
-    constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<DataType>();
-    if constexpr (dataType != ImGuiDataType_COUNT)
+  // General for all numeric and floating point types
+  if (!EditorNumberField(object, objectInfo))
+  {
+    // No editor implemented
+    consteval std::string msg = "No editor implemented for type: " + display_name_of(^DataType);
+    ImGui::Text(msg.c_str());
+  }
+}
+
+// ----------------Editors for ranges----------------
+
+// ----------------Setup for ranges----------------
+template<typename T>
+concept Insertable = requires(T object) { object.insert({}); } || requires(T object) { object.push_back({}); };
+
+template <Insertable DataType>
+void UniversalAddNew(DataType& object)
+{
+  if constexpr (requires(DataType object) { object.push_back({}); })
+  {
+    object.push_back({});
+  }
+  else if constexpr (requires(DataType object) { object.insert({}); })
+  {
+    object.insert({});
+  }
+}
+
+template <typename DataType>
+concept Reorderable = requires(DataType object) { {std::swap(object.at(0), object.at(1))}; };
+
+template <typename DataType>
+concept Removable = requires(DataType object, decltype(std::begin(object)) it) 
+{ 
+  // can erase iterator
+  { object.erase(std::begin(object)++) };
+};
+
+template <Reorderable DataType>
+void RunReorderButtons(DataType& range, int index, float startX)
+{
+  // if first don't show up button
+  if (!index == 0)
+  {
+    ImGui::SameLine(startX);
+    // move item up
+    constexpr std::string upButtonName = std::format("##ItemUp{}", index);
+    if (ImGui::ArrowButton(upButtonName.c_str(), ImGuiDir_Up))
     {
-      constexpr std::string imGuiName = std::string("##") + std::meta::display_name_of(objectInfo);
-      ImGui::InputScalar(imGuiName.c_str(), ScalarInput(dataType), &val, nullptr, nullptr, nullptr, flags)
-    }
-    else
-    {
-      // No editor implemented
-      consteval std::string msg = "No editor implemented for type: " + display_name_of(^T);
-      ImGui::Text(msg.c_str());
+      // swap with previous
+      using std::swap;
+      // uses advance to be universal for vectors and maps
+      auto it = std::advance(std::begin(range), index - 1);
+      swap(it, it++);
     }
   }
-};
 
-
-// Specialized editor for lists
-template <typename T>
-concept Iterable = requires(T t) 
-{
-  std::begin(t); // must have a begin function
-  std::end(t);   // must have an end function
-};
-template <Iterable DataType>
-struct EditorProperties
-{
-  static void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+  // if last don't show down button
+  if (index == range.size() - 1)
   {
-    if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+    // 60 if both, 40 if not removable
+    ImGui::SameLine(startX - 20);
+    // move item down
+    constexpr std::string downButtonName = std::format("##ItemDown{}", index);
+    if (ImGui::ArrowButton(downButtonName.c_str(), ImGuiDir_Down))
     {
-      int i = 0;
-      for (auto& val : object)
+      // swap with next
+      using std::swap;
+      // uses advance to be universal for vectors and maps
+      auto it = std::advance(std::begin(range), index);
+      swap(it, it++);
+    }
+  }
+}
+
+template <Removable DataType>
+void RunDeleteButton(DataType& range, int index, float startX)
+{
+  ImGui::SameLine(startX);
+  // delete item
+  constexpr std::string deleteButtonName = std::format("##ItemDelete{}", index);
+  if (ImGui::Button(deleteButtonName.c_str()))
+  {
+    // uses advance to be universal for vectors and maps
+    auto it = std::advance(std::begin(range), index);
+    // so it works for both vectors and maps
+    range.erase(it);
+  }
+}
+
+template <typename DataType> requires Reorderable<DataType> || Removable<DataType>
+void RunRangeValueButtons(DataType& range, int index)
+{
+  constexpr bool reorderable = Reorderable<DataType>;
+  constexpr bool removable = Removable<DataType>;
+
+  float widthX = ImGui::GetWindowContentRegionMax().x;
+  
+  // if reorderble do up and down buttons
+  if constexpr (reorderable)
+  {
+    // if removable move buttons over
+    RunReorderButtons(range, index, widthX - (60 + 20 * removable))
+  }
+
+  // if removable do delete button
+  if constexpr (removable)
+  {
+    RunDeleteButton(range, index, widthX - 40);
+  }
+}
+
+template <typename T>
+concept TupleLike = requires(T object) { std::tuple_size<T>::value; };
+
+template <typename T>
+concept IterableTuple = std::ranges::range<T> && requires(T object) { 
+  TupleLike<decltype(*std::begin(object))>;
+};
+
+
+// ----------------Editor Functions for ranges----------------
+
+// Can change the label of the drop down to be the index, key, or value
+// do it by doing PropertyDefault<T, DropDownLabel::Key>
+template <std::ranges::range DataType>
+void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+{
+  using dropDownLabel = GetTemplateArg<DropDownLabel>(objectInfo);
+
+  using RangeValueType = decltype(*std::begin(object));
+
+  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  {
+    int i = 0;
+    for (auto& val : object)
+    {
+      std::string tag;
+      if constexpr (dropDownLabel == DropDownLabel::Index)
       {
-        // for list of pairs (because pairs are most likely to be maps or map-like)
-        if constexpr (std::is_convertible_v<decltype(val.first), std::string>)
+        tag = std::format("{}##{}", i, i);
+      }
+      else if constexpr (dropDownLabel == DropDownLabel::Key)
+      {
+        using KeyType = decltype(std::begin(object)->first);
+        if constexpr (std::formattable<KeyType>)
         {
-          //TODO: make editing the first value not close the dropdown
-          if(ImGui::TreeNodeEx(static_cast<std::string>(val.first).c_str(), ImGuiTreeNodeFlags_AllowItemOverlap))
-          {
-            RunObjectImGuiEditorInterface(val.first, std::meta::info{});
-            RunObjectImGuiEditorInterface(val.second, std::meta::info{});
-            ImGui::TreePop();
-          }
-        }
-        else
-        {
-          RunObjectImGuiEditorInterface(val, std::meta::info{});
-          i++;
+          tag = std::format("{}##{}", std::get<0>(val), i)
         }
       }
-      
-      ImGui::TreePop();
+      else if constexpr (dropDownLabel == DropDownLabel::Value && std::formattable<RangeValueType>)
+      {
+        tag = std::format("{}##{}", val, i);
+      }
+
+      if (ImGui::TreeNodeEx(tag.c_str(), ImGuiTreeNodeFlags_AllowItemOverlap))
+      {
+        RunObjectImGuiEditorInterface(val, std::meta::info{});
+        ImGui::TreePop();
+      }
+      i++;
     }
+    if constexpr (Insertable<DataType>)
+    {
+      static TypeInRange newObject{};
+      if (ImGui::Button("Add new with below"))
+      {
+        UniversalAddNew(newObject)
+      }
+      // TODO: see if I can change the variable name to be new object
+      EditorFunc(newObject, ^newObject);
+    }
+    ImGui::TreePop();
   }
-};
+}
+
+// ----------------Editor Functions for tuples----------------
+
+// for tuple-like types
+template <TupleLike DataType>
+void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+{
+  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  {
+    std::apply([&](auto&... args) { (RunObjectImGuiEditorInterface(args, std::meta::info{}), ...); }, object);
+    ImGui::TreePop();
+  }
+}
+
+// ----------------Editor Function for bool----------------
+void EditorFunc(bool& object, const std::meta::info& objectInfo)
+{
+  if (!objectInfo.is_nsdm())
+  {
+    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
+  }
+
+  ImGui::SameLine();
+  ImGui::Checkbox(std::format("##{}", std::meta::display_name_of(objectInfo)).c_str(), &object);
+}
+
+// ----------------Editor Function for std::string----------------
+void EditorFunc(std::string& object, const std::meta::info& objectInfo)
+{
+  if (!objectInfo.is_nsdm())
+  {
+    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
+  }
+
+  ImGui::SameLine();
+  ImGui::InputText(std::format("##{}", std::meta::display_name_of(objectInfo)).c_str(), &object);
+}
+
+// ----------------Editor Function for enums----------------
+// TODO: make it so you can change the enum to a drop down
+
+// ----------------Editor Function for ranges----------------
+template <IterableTuple DataType>
+void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+{
+  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  {
+    std::apply([&](auto&... args) { (RunObjectImGuiEditorInterface(args, std::meta::info{}), ...); }, object);
+    ImGui::TreePop();
+  }
+}
+
+template <std::ranges::range DataType>
+void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+{
+  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  {
+    int i = 0;
+    for (auto& val : object)
+    {
+      std::string tag = std::format("{}##{}", i, i);
+      if (ImGui::TreeNodeEx(tag.c_str(), ImGuiTreeNodeFlags_AllowItemOverlap))
+      {
+        RunObjectImGuiEditorInterface(val, std::meta::info{});
+        ImGui::TreePop();
+      }
+      i++;
+    }
+    if constexpr (Insertable<DataType>)
+    {
+      static TypeInRange newObject{};
+      if (ImGui::Button("Add new with below"))
+      {
+        UniversalAddNew(newObject)
+      }
 
 
+// ----------------Runs interface for any object----------------
 template <GenerateProperties editorProperties, typename DataType>
 void RunObjectImGuiEditorInterface(DataType& object, const std::meta::info& objectInfo)
 {
@@ -292,50 +631,55 @@ void RunObjectImGuiEditorInterface(DataType& object, const std::meta::info& obje
     constexpr auto options = GetPropertyOptions(objectInfo);
     if constexpr (GetPropertyOptions(objectInfo).editorFunc)
     {
-      options.editorFunc(objectInfo, objectInfo);
+      options.editorFunc(object, objectInfo);
       return;
     }
   }
   
   // else run the default editor
-  EditorProperties<DataType>::EditorFunc(object, objectInfo);
+  EditorFunc<DataType>(object, objectInfo);
 }
 
-template <GenerateProperties editorProperties, typename DataType>
-void GenerateObjectImGuiEditorInterface(DataType& object, const std::meta::info& objectInfo)
+
+
+// ----------------Editor Generate Code----------------
+template <GenerateProperties editorProperties, auto... Tags>
+void GenerateObjectImGuiEditorInterface(auto& object, const std::meta::info& objectInfo)
 {
+  // For struct like types
   if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
   {
-    RunFuncOnAllNSDM(object, [&](const std::meta::info& objectInfo)
+    // If it has the Array tag and they are all the same numeric type 
+    if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array && AllSameNumeric<decltype(object)>)
     {
-      RunImGuiValueInterface(object, member);
-    }, EditorConditionFunc<editorProperties>);
+      EditorArrayOfValuesField<editorProperties>(object, objectInfo);
+    }
+    else
+    {
+      EditorStructFields<editorProperties>(object, objectInfo);
+    }
     ImGui::TreePop();
   }
 }
 
-#define EDITOR_AUTO_FLAGS(class, editorProperties)\
-template <>\
-struct EditorProperties<class>\
+#define EDITOR_AUTO_FLAGS(class, editorProperties, ...)\
+friend void EditorFunc(class& object, const std::meta::info& objectInfo)\
 {\
-  static void EditorFunc(class& object, const std::meta::info& objectInfo)\
-  {\
-    GenerateObjectImGuiEditorInterface<editorProperties>(object)\
-  }\
-};
+  GenerateObjectImGuiEditorInterface<editorProperties, __VA_ARGS__>(object)\
+}
 
-#define EDITOR_AUTO(class) EDITOR_AUTO_FLAGS(class, GenerateProperties{})
+#define EDITOR_AUTO(class, ...) EDITOR_AUTO_FLAGS(class, GenerateProperties{}, __VA_ARGS__)
 
 
 // -----------------------------------------
 // ------------------Both-------------------
 // -----------------------------------------
 
-#define PROPERTY_AUTO_BOTH_FLAGS(class, serializeProperties, editorProperties)\
-JSON_SERIALIZE_AUTO_FLAGS(class, serializeProperties)\
-EDITOR_AUTO_FLAGS(class, editorProperties)
+#define PROPERTY_AUTO_BOTH_FLAGS(class, generateProperties, editorProperties, ...)\
+JSON_SERIALIZE_AUTO_FLAGS(class, generateProperties, __VA_ARGS__)\
+EDITOR_AUTO_FLAGS(class, editorProperties, __VA_ARGS__)
 
-#define PROPERTY_AUTO_FLAGS(class, properties) PROPERTY_AUTO_BOTH_FLAGS(class, properties, properties)
+#define PROPERTY_AUTO_FLAGS(class, properties, ...) PROPERTY_AUTO_BOTH_FLAGS(class, properties, properties, __VA_ARGS__)
 
-#define PROPERTY_AUTO(class) PROPERTY_AUTO_FLAGS(class, GenerateProperties{})
+#define PROPERTY_AUTO(class, ...) PROPERTY_AUTO_FLAGS(class, GenerateProperties{}, __VA_ARGS__)
 
