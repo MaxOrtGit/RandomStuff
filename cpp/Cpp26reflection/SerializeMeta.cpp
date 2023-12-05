@@ -80,7 +80,7 @@ struct Transform
 // ----------------Key as drop down label----------------
 // need to make a format to convert FloatVec2 to a string
 template <>
-struct std::formatter<FloatVec2> : std::formatter<std::string> 
+struct std::formatter<FloatVec2> : std::formatter<std::string_view> 
 {
   auto format(const FloatVec2& vec, format_context& ctx) const 
   {

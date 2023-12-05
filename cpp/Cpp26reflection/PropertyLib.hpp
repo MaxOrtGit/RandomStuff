@@ -11,6 +11,94 @@ template <typename DataType>
 void RunObjectImGuiEditorInterface(DataType& object);
 
 
+// -------------------------------------------------
+// ----------------------Utils----------------------
+// -------------------------------------------------
+
+// ----------------Utils for enums----------------
+template <typename T>
+concept EnumType = std::is_enum_v<T>;
+
+template <EnumType Enum>
+consteval std::string_view EnumToString(const Enum& object)
+{
+  // For all members of the enum
+  template for (constexpr auto e : std::meta::members_of(^E)) 
+  {
+    // if the value is the same as the object return the name
+    if (value == [:e:]) 
+    {
+      return std::meta::name_of(e);
+    }
+  }
+
+  return "<unnamed>";
+}
+
+template <EnumType Enum>
+consteval Enum EnumFromString(const std::string_view& string)
+{
+  // For all members of the enum
+  template for (constexpr auto e : std::meta::members_of(^E)) 
+  {
+    // if the name is the same as the string return the value
+    if (std::meta::name_of(e) == string) 
+    {
+      // return the enum
+      return [:e:];
+    }
+  }
+
+  return {};
+}
+
+// formatter for enums
+template <EnumType Enum>
+struct std::formatter<Enum> : std::formatter<std::string_view>
+{
+  template <typename FormatContext>
+  auto format(Enum e, FormatContext& ctx) 
+  {
+    return std::formatter<std::string_view>::format(EnumToString(e), ctx);
+  }
+};
+
+// creates an enum combo string
+template <EnumType Enum>
+std::string CreateComboStringFromEnum()
+{
+  std::string comboString;
+  template for (constexpr auto val : std::meta::members_of(^Enum)) 
+  {
+    comboString += std::format("{}\0", val);
+  }
+  return comboString;
+}
+
+// converts an enum to an index within the enum for use with a combo box
+template <EnumType Enum>
+int IndexFromEnum(const Enum& object)
+{
+  int i = 0;
+  template for (constexpr auto val : std::meta::members_of(^Enum)) 
+  {
+    if (val == object)
+    {
+      return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+// converts an index within the enum to an enum for use with a combo box
+template <EnumType Enum>
+Enum EnumFromIndex(int index)
+{
+  return std::meta::members_of(^Enum)[index];
+}
+
+
 // ----------------Property marking code----------------
 template <typename DataType>
 using ToJsonFunc = void (*)(json&, const DataType&);
@@ -97,15 +185,7 @@ template <typename T, auto... Args>
 consteval T GetTemplateArg()
 {
   using Helper = HelperClass<Args...>;
-
-  template for (constexpr auto arg : std::meta::template_arguments_of(^Helper))
-  {
-    if constexpr (std::meta::type_of(arg) == ^T)
-    {
-      return arg;
-    }
-  }
-  return {};
+  return GetTemplateArg<T>(^Helper);
 }
 
 consteval auto GetPropertyOptions(const std::meta::info& member)
@@ -134,6 +214,26 @@ enum class ClassFormat
 // -----------------Serialize Code-----------------
 // ------------------------------------------------
 
+// ----------------General serialize funcs----------------
+
+// ----------------Enums----------------
+namespace nlohmann {
+template <EnumType DataType>
+struct adl_serializer<DataType>
+{
+  static void to_json(json& j, const DataType& dataType)
+  {
+    j = EnumToString(dataType);
+  }
+
+  static void from_json(const json& j, DataType& dataType)
+  {
+    dataType = EnumFromString<DataType>(j.get<std::string>());
+  }
+};
+}
+
+
 // ----------------Serialize property Code----------------
 template <GenerateProperties generateProperties>
 bool SerializeConditionFunc(std::meta::info member)
@@ -160,17 +260,14 @@ void ToJsonAllMembers(json& j, const auto& object)
 {
   RunFuncOnAllNSDM(object, [&](const std::meta::info& member)
   {
-    if constexpr (GetPropertyOptions(member))
-    {
-      std::meta::template_arguments_of(std::meta::typeof(member))[1].toJsonFunc(j, object.[:member:]);
-    }
-    else if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array)
+    // if the class format is an array then serialize as an array
+    if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array)
     {
       j.push_back(dataType.[:member:]);
     }
-    else
+    else // use the toJsonFunc (default is name: value)
     {
-      j[std::meta::display_name_of(member)] = object.[:member:];
+      GetPropertyOptions(member).toJsonFunc(j, object.[:member:]);
     }
   }, SerializeConditionFunc<generateProperties>);
 }
@@ -181,17 +278,14 @@ void FromJsonAllMembers(const json& j, auto& object)
   int i = 0;
   RunFuncOnAllNSDM(object, [&](const std::meta::info& member)
   {
-    if constexpr (GetPropertyOptions(member))
-    {
-      std::meta::template_arguments_of(std::meta::typeof(member))[1].fromJsonFunc(j, object.[:member:]);
-    }
-    else if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array)
+    // if the class format is an array then deserialize as an array
+    if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array)
     {
       j.at(i++).get_to(object.[:member:]);
     }
-    else
+    else // use the fromJsonFunc (default is name: value)
     {
-      object.[:member:] = j.value(std::meta::display_name_of(member), object.[:member:]);
+      GetPropertyOptions(member).fromJsonFunc(j, object.[:member:]);
     }
   }, SerializeConditionFunc<generateProperties>);
 }
@@ -582,41 +676,6 @@ void EditorFunc(std::string& object, const std::meta::info& objectInfo)
 }
 
 // ----------------Editor Function for enums----------------
-template <typename Enum>
-std::string CreateComboStringFromEnum()
-{
-  std::string comboString;
-  template for (constexpr auto val : std::meta::members_of(^Enum)) 
-  {
-    comboString += std::format("{}\0", val);
-  }
-  return comboString;
-}
-
-template <typename Enum>
-int IndexFromEnum(const Enum& object)
-{
-  int i = 0;
-  template for (constexpr auto val : std::meta::members_of(^Enum)) 
-  {
-    if (val == object)
-    {
-      return i;
-    }
-    i++;
-  }
-  return -1;
-}
-
-template <typename Enum>
-Enum EnumFromIndex(int index)
-{
-  return std::meta::members_of(^Enum)[index];
-}
-
-template <typename T>
-concept EnumType = std::is_enum_v<T>;
-
 template <EnumType DataType>
 void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 {
@@ -634,6 +693,7 @@ void EditorFunc(DataType& object, const std::meta::info& objectInfo)
   int index = IndexFromEnum(object);
   ImGui::Combo(imGuiName.c_str(), &index, comboString.c_str());
 
+  object = EnumFromIndex<DataType>(index);
 }
 
 
