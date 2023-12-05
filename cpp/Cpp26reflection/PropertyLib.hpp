@@ -15,6 +15,10 @@ void RunObjectImGuiEditorInterface(DataType& object);
 // ----------------------Utils----------------------
 // -------------------------------------------------
 
+// ----------------Utils for tuples----------------
+template <typename T>
+concept TupleLike = requires(T object) { std::tuple_size<T>::value; };
+
 // ----------------Utils for enums----------------
 template <typename T>
 concept EnumType = std::is_enum_v<T>;
@@ -145,6 +149,12 @@ using PropertyDefault = Property<DataType, PropertyOptions<DataType>{}, Tags...>
 template <typename T, typename Arg>
 consteval void RunFuncOnAllNSDM(T& object, std::function<void(Arg)>& func, std::function<bool(std::meta::info)> conditionFunc = nullptr)
 {
+  // loop through all base classes and serialize all their members
+  template for (constexpr auto base : std::meta::bases_of(^T))
+  {
+    RunFuncOnAllNSDM(static_cast<typename[:base:]&>(object), func, conditionFunc);
+  }
+
   template for (constexpr auto member : std::meta::nonstatic_data_members_of(^T))
   {
     if constexpr (conditionFunc && !conditionFunc(member))
@@ -574,8 +584,6 @@ void RunRangeValueButtons(DataType& range, int index)
   }
 }
 
-template <typename T>
-concept TupleLike = requires(T object) { std::tuple_size<T>::value; };
 
 template <typename T>
 concept IterableTuple = std::ranges::range<T> && requires(T object) { 
