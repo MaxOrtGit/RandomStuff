@@ -286,7 +286,7 @@ bool EditorNumberField(DataType& number, const std::meta::info& objectInfo)
 
   if constexpr (dataType != ImGuiDataType_COUNT)
   {
-    constexpr std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+    static std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
     ImGui::InputScalar(imGuiName.c_str(), ScalarInput(dataType), &val, nullptr, nullptr, nullptr, flags)
   }
 
@@ -337,7 +337,7 @@ void EditorArrayOfValuesField(AllSameNumeric auto& object, const std::meta::info
     pointerVec.push_back(&object.[:member:]);
   }, EditorConditionFunc<editorProperties>);
 
-  constexpr std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+  static std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
   constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<ValueType>();
   void** data = reinterpret_cast<void**>(pointerArray.data());
   int size = static_cast<int>(pointerArray.size());
@@ -582,42 +582,60 @@ void EditorFunc(std::string& object, const std::meta::info& objectInfo)
 }
 
 // ----------------Editor Function for enums----------------
-// TODO: make it so you can change the enum to a drop down
-
-// ----------------Editor Function for ranges----------------
-template <IterableTuple DataType>
-void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+template <typename Enum>
+std::string CreateComboStringFromEnum()
 {
-  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  std::string comboString;
+  template for (constexpr auto val : std::meta::members_of(^Enum)) 
   {
-    std::apply([&](auto&... args) { (RunObjectImGuiEditorInterface(args, std::meta::info{}), ...); }, object);
-    ImGui::TreePop();
+    comboString += std::format("{}\0", val);
   }
+  return comboString;
 }
 
-template <std::ranges::range DataType>
+template <typename Enum>
+int IndexFromEnum(const Enum& object)
+{
+  int i = 0;
+  template for (constexpr auto val : std::meta::members_of(^Enum)) 
+  {
+    if (val == object)
+    {
+      return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+template <typename Enum>
+Enum EnumFromIndex(int index)
+{
+  return std::meta::members_of(^Enum)[index];
+}
+
+template <typename T>
+concept EnumType = std::is_enum_v<T>;
+
+template <EnumType DataType>
 void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 {
-  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  static std::string comboString = CreateComboStringFromEnum<DataType>();
+
+  if (!objectInfo.is_nsdm())
   {
-    int i = 0;
-    for (auto& val : object)
-    {
-      std::string tag = std::format("{}##{}", i, i);
-      if (ImGui::TreeNodeEx(tag.c_str(), ImGuiTreeNodeFlags_AllowItemOverlap))
-      {
-        RunObjectImGuiEditorInterface(val, std::meta::info{});
-        ImGui::TreePop();
-      }
-      i++;
-    }
-    if constexpr (Insertable<DataType>)
-    {
-      static TypeInRange newObject{};
-      if (ImGui::Button("Add new with below"))
-      {
-        UniversalAddNew(newObject)
-      }
+    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
+  }
+
+  ImGui::SameLine();
+
+  static std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+
+  int index = IndexFromEnum(object);
+  ImGui::Combo(imGuiName.c_str(), &index, comboString.c_str());
+
+}
+
 
 
 // ----------------Runs interface for any object----------------
