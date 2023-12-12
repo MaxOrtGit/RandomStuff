@@ -192,4 +192,4 @@ cython_debug/
 *.pdb
 
 # Visual Studio Code
-.vscode/
+#.vscode/
