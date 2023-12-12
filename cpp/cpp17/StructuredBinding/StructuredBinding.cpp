@@ -22,7 +22,7 @@ public:
 
 namespace std {
   template <> struct tuple_size<Point> : std::integral_constant<size_t, 2> {};
-  template <size_t I> struct tuple_element<I, Point> { using type = int; };
+  template <size_t I> struct tuple_element<I, Point> : std::type_identity<int> {};
 }
 
 int Normal() 
@@ -66,7 +66,7 @@ namespace std {
   template <PointLike T>
   struct tuple_size<T> : std::integral_constant<size_t, 2> {};
   template <size_t I, PointLike T>
-  struct tuple_element<I, T> { using type = decltype(T{}.get<I>()); };
+  struct tuple_element<I, T> : std::type_identity<decltype(std::declval<T>().get<I>())> {};
 }
 
 int Concept() 
