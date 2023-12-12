@@ -1,10 +1,11 @@
-#include <print>
+//#include <print>
 #include <string>
 #include <string_view>
 #include <format>
 #include <vector>
 #include <variant>
 #include <tuple>
+#include <iostream>
 
 // it and ctx are modified
 template <typename T, typename CharT>
@@ -249,15 +250,11 @@ public:
 
 
 int main() {
-  std::print("MSVC version {}\n", _MSC_VER); // needs to be 1937 or higher
+  //std::print("MSVC version {}\n", _MSC_VER); // needs to be 1937 or higher
 
   std::tuple<int, float, char, std::string_view, float, float> obj{11, 2.0, '%', "four", 1.2, 3.4};
 
-  constexpr auto func_ptrs = [&]<size_t... Is>(std::index_sequence<Is...>) {
-    return std::array{Is...};
-  };
-  std::cout << func_ptrs[0];
-
-  std::println("-{:()[ ]}-", obj);
-  std::println("-{:[ - ]3[], 0[_^10x], 1, 4, 5}-", obj);
+  //std::println("-{:()[ ]}-", obj);
+  //std::println("-{:[ - ]3[], 0[_^10x], 1, 4, 5}-", obj);
+  std::cout << std::format("-{:[ - ]3[], 0[_^10x], 1, 4, 5}-", obj);
 }
