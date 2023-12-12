@@ -82,3 +82,14 @@ namespace std::meta {
   consteval auto bit_offset_of(info entity) -> size_t;
   consteval auto bit_size_of(info entity) -> size_t;
 }
+
+
+consteval std::meta::info GetFirstMember(const std::meta::info& objectInfo)
+{
+  return std::meta::nonstatic_data_members_of(objectInfo)[0];
+}
+
+consteval size_t GetMemberCount(const std::meta::info& objectInfo)
+{
+  return std::meta::nonstatic_data_members_of(objectInfo).size();
+}
