@@ -2,6 +2,7 @@
 #include "json.hpp"
 #include "imgui.h"
 #include <ranges>
+#include <variant>
 
 using json = nlohmann::ordered_json;
 
@@ -14,6 +15,33 @@ void RunObjectImGuiEditorInterface(DataType& object);
 // -------------------------------------------------
 // ----------------------Utils----------------------
 // -------------------------------------------------
+
+// ----------------Utils for ranges----------------
+template<typename T>
+concept Insertable = requires(T object) { object.insert({}); } || requires(T object) { object.push_back({}); };
+
+template <Insertable DataType>
+void UniversalAddNew(DataType& object)
+{
+  if constexpr (requires(DataType object) { object.push_back({}); })
+  {
+    object.push_back({});
+  }
+  else if constexpr (requires(DataType object) { object.insert({}); })
+  {
+    object.insert({});
+  }
+}
+
+template <typename DataType>
+concept Reorderable = requires(DataType object) { {std::swap(object.at(0), object.at(1))}; };
+
+template <typename DataType>
+concept Removable = requires(DataType object, decltype(std::begin(object)) it) 
+{ 
+  // can erase iterator
+  { object.erase(std::begin(object)++) };
+};
 
 // ----------------Utils for tuples----------------
 template <typename T>
@@ -102,6 +130,44 @@ Enum EnumFromIndex(int index)
   return std::meta::members_of(^Enum)[index];
 }
 
+// ----------------Utils for variants----------------
+template <typename T>
+concept VariantType = std::meta::template_of(^T) == ^Property;
+
+consteval std::vector<std::meta::info> GetVariantTypes(const std::meta::info& member)
+{
+  // TODO: dealias maybe
+  return std::meta::template_arguments_of(std::meta::type_of(member));
+}
+
+
+template <size_t I>
+void TryDefaultTupleWithIndex(T& object, int index)
+{
+  if (I == index)
+  {
+    object = std::variant_alternative_t<I, T>{};
+  }
+}
+
+template<typename T, T... Ints>
+void Impl_DefaultTupleToIndex(std::integer_sequence<T, Ints...> IntSeq, T& object, int index)
+{
+  (TryDefaultTupleWithIndex<Ints>(object, index), ...);
+}
+
+template <typename T>
+void DefaultTupleToIndex(T& object, int index)
+{
+  Impl_DefaultTupleToIndex(std::make_integer_sequence<T, std::tuple_size_v<T>>{}, object, index);
+}
+
+
+// ----------------Utils for structs----------------
+// for classes with all the same numeric/floating point types
+template <typename DataType>
+concept AllSameNumeric = IsAllSameNumeric<DataType>();
+
 
 // ----------------Property marking code----------------
 template <typename DataType>
@@ -129,11 +195,11 @@ struct PropertyOptions
 
   ToJsonFunc<DataType> toJsonFunc = [](json& j, const DataType& dataType) constexpr
   {
-    j[std::meta::display_name_of(^dataType)] = dataType;
+    j[std::meta::name_of(^dataType)] = dataType;
   };
   FromJsonFunc<DataType> fromJsonFunc = [](const json& j, DataType& dataType) constexpr
   {
-    dataType = j.value(std::meta::display_name_of(^dataType), dataType);
+    dataType = j.value(std::meta::name_of(^dataType), dataType);
   };
   EditorFunc<DataType> editorFunc = nullptr;
 };
@@ -242,6 +308,68 @@ struct adl_serializer<DataType>
   }
 };
 }
+
+// ----------------Variant----------------
+
+template <VariantType DataType>
+void SetVariantFromJson(DataType& dataType, const json& j)
+{
+  template for (constexpr auto type : GetVariantTypes<DataType>())
+  {
+    if (std::meta::name_of(type) == j.key())
+    {
+      dataType = j.value().get<typename[:type:]>();
+      return;
+    }
+  }
+}
+
+template <VariantType DataType>
+void SetJsonFromVariant(const DataType& dataType, json& j)
+{
+  std::visit([&](const auto& val) 
+  { 
+    j.emplace(std::meta::name_of(type_of(^val)), val); 
+  }, dataType);
+}
+
+// Monostate
+namespace nlohmann 
+{
+template <>
+struct adl_serializer<std::monostate>
+{
+  static void to_json(json& j, const std::monostate& dataType)
+  {
+    j = nullptr;
+  }
+  static void from_json(const json& j, std::monostate& dataType)
+  {
+    dataType = std::monostate{};
+  }
+};
+}
+
+// Variant
+namespace nlohmann 
+{
+template <VariantType DataType>
+struct adl_serializer<DataType>
+{
+  static void to_json(json& j, const DataType& dataType)
+  {
+    SetJsonFromVariant(dataType, *j.begin()); 
+  }
+
+  static void from_json(const json& j, DataType& dataType)
+  {
+    SetVariantFromJson(dataType, *j.begin());
+  }
+};
+}
+
+
+// ----------------Serialize Utils----------------
 
 
 // ----------------Serialize property Code----------------
@@ -381,6 +509,16 @@ bool EditorConditionFunc(std::meta::info member)
 }
 
 // ----------------Editor Number Field----------------
+// if it is a nsdm it will put the name of the member
+bool EditorMemberTitle(const std::meta::info& objectInfo)
+{
+  if constexpr (std::meta::is_nsdm(objectInfo))
+  {
+    ImGui::Text(std::meta::name_of(objectInfo).c_str());
+  }
+}
+
+
 // for all numeric and floating point types
 template <typename DataType>
 bool EditorNumberField(DataType& number, const std::meta::info& objectInfo)
@@ -390,7 +528,7 @@ bool EditorNumberField(DataType& number, const std::meta::info& objectInfo)
 
   if constexpr (dataType != ImGuiDataType_COUNT)
   {
-    static std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+    std::string imGuiName = std::format("##{}", std::meta::name_of(objectInfo));
     ImGui::InputScalar(imGuiName.c_str(), ScalarInput(dataType), &val, nullptr, nullptr, nullptr, flags)
   }
 
@@ -408,10 +546,10 @@ consteval bool IsAllSameNumeric()
     // If it is the first member set the dataType
     if (dataType == static_cast<ImGuiDataType>(-1))
     {
-      dataType = MapTypeToImGuiDataType<std::meta::typeof(member)>();
+      dataType = MapTypeToImGuiDataType<typename[:member:]>();
     }
     // If the dataType of the member is not the same as the first member return false
-    else if (dataType != MapTypeToImGuiDataType<typename[:std::meta::typeof(member):]>())
+    else if (dataType != MapTypeToImGuiDataType<typename[:member:]>())
     {
       return false;
     }
@@ -421,17 +559,13 @@ consteval bool IsAllSameNumeric()
   return dataType != ImGuiDataType_COUNT;
 }
 
-// for classes with all the same numeric/floating point types
-template <typename DataType>
-concept AllSameNumeric = IsAllSameNumeric<DataType>();
-
 
 // if all members are the same numeric type then it will be an array of pointers to the same value
 template <GenerateProperties editorProperties = GenerateProperties{}>
 void EditorArrayOfValuesField(AllSameNumeric auto& object, const std::meta::info& objectInfo)
 {
   using DataType = decltype(object);
-  using ValueType = typename[:GetFirstMember(objectInfo):];
+  using ValueType = typename[:GetFirstMember(^DataType):];
 
   // array of pointers to the same value
   std::array<ValueType*, GetMemberCount(objectInfo)> pointerVec;
@@ -441,7 +575,7 @@ void EditorArrayOfValuesField(AllSameNumeric auto& object, const std::meta::info
     pointerVec.push_back(&object.[:member:]);
   }, EditorConditionFunc<editorProperties>);
 
-  static std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+  std::string imGuiName = std::format("##{}", std::meta::name_of(objectInfo));
   constexpr ImGuiDataType dataType = MapTypeToImGuiDataType<ValueType>();
   void** data = reinterpret_cast<void**>(pointerArray.data());
   int size = static_cast<int>(pointerArray.size());
@@ -466,17 +600,13 @@ void EditorStructFields(DataType auto& object, const std::meta::info& objectInfo
 template <typename DataType>
 void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 {
-  // For all not specialized (std::string, bool, int, float, etc.)
-  if (!objectInfo.is_nsdm())
-  {
-    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
-  }
+  EditorMemberTitle(objectInfo);
 
   // General for all numeric and floating point types
   if (!EditorNumberField(object, objectInfo))
   {
     // No editor implemented
-    consteval std::string msg = "No editor implemented for type: " + display_name_of(^DataType);
+    consteval std::string msg = "No editor implemented for type: " + name_of(^DataType);
     ImGui::Text(msg.c_str());
   }
 }
@@ -484,32 +614,6 @@ void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 // ----------------Editors for ranges----------------
 
 // ----------------Setup for ranges----------------
-template<typename T>
-concept Insertable = requires(T object) { object.insert({}); } || requires(T object) { object.push_back({}); };
-
-template <Insertable DataType>
-void UniversalAddNew(DataType& object)
-{
-  if constexpr (requires(DataType object) { object.push_back({}); })
-  {
-    object.push_back({});
-  }
-  else if constexpr (requires(DataType object) { object.insert({}); })
-  {
-    object.insert({});
-  }
-}
-
-template <typename DataType>
-concept Reorderable = requires(DataType object) { {std::swap(object.at(0), object.at(1))}; };
-
-template <typename DataType>
-concept Removable = requires(DataType object, decltype(std::begin(object)) it) 
-{ 
-  // can erase iterator
-  { object.erase(std::begin(object)++) };
-};
-
 template <Reorderable DataType>
 void RunReorderButtons(DataType& range, int index, float startX)
 {
@@ -584,14 +688,28 @@ void RunRangeValueButtons(DataType& range, int index)
   }
 }
 
+// ----------------Editor Functions for ranges----------------
 
 template <typename T>
-concept IterableTuple = std::ranges::range<T> && requires(T object) { 
-  TupleLike<decltype(*std::begin(object))>;
-};
+concept IsFormattablePair = std::formattable<decltype(T{}.first)>
 
-
-// ----------------Editor Functions for ranges----------------
+// Gets the tag for the drop down
+template <DropDownLabel dropDownLabel, typename RangeValueType>
+std::string GetRangeIndexName(int index)
+{
+  // Get the tag for the drop down
+  if constexpr (dropDownLabel == DropDownLabel::Key && IsFormattablePair<RangeValueType>)
+  {
+    using KeyType = decltype(std::begin(object)->first);
+    if constexpr (std::formattable<KeyType>)
+      return std::format("{}##{}", std::get<0>(val), i);
+  }
+  else if constexpr (dropDownLabel == DropDownLabel::Value && std::formattable<RangeValueType>)
+  {
+    return std::format("{}##{}", val, i);
+  }
+  return std::format("{}##{}", i, i);
+}
 
 // Can change the label of the drop down to be the index, key, or value
 // do it by doing PropertyDefault<T, DropDownLabel::Key>
@@ -602,28 +720,13 @@ void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 
   using RangeValueType = decltype(*std::begin(object));
 
-  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  if (ImGui::TreeNodeEx(std::meta::name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
   {
     int i = 0;
     for (auto& val : object)
     {
-      std::string tag;
-      if constexpr (dropDownLabel == DropDownLabel::Index)
-      {
-        tag = std::format("{}##{}", i, i);
-      }
-      else if constexpr (dropDownLabel == DropDownLabel::Key)
-      {
-        using KeyType = decltype(std::begin(object)->first);
-        if constexpr (std::formattable<KeyType>)
-        {
-          tag = std::format("{}##{}", std::get<0>(val), i)
-        }
-      }
-      else if constexpr (dropDownLabel == DropDownLabel::Value && std::formattable<RangeValueType>)
-      {
-        tag = std::format("{}##{}", val, i);
-      }
+      // Get the tag for the drop down
+      std::string tag = GetRangeIndexName<dropDownLabel, RangeValueType>(i);
 
       if (ImGui::TreeNodeEx(tag.c_str(), ImGuiTreeNodeFlags_AllowItemOverlap))
       {
@@ -652,7 +755,7 @@ void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 template <TupleLike DataType>
 void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 {
-  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  if (ImGui::TreeNodeEx(std::meta::name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
   {
     std::apply([&](auto&... args) { (RunObjectImGuiEditorInterface(args, std::meta::info{}), ...); }, object);
     ImGui::TreePop();
@@ -662,46 +765,66 @@ void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 // ----------------Editor Function for bool----------------
 void EditorFunc(bool& object, const std::meta::info& objectInfo)
 {
-  if (!objectInfo.is_nsdm())
-  {
-    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
-  }
-
+  EditorMemberTitle(objectInfo);
   ImGui::SameLine();
-  ImGui::Checkbox(std::format("##{}", std::meta::display_name_of(objectInfo)).c_str(), &object);
+  ImGui::Checkbox(std::format("##{}", std::meta::name_of(objectInfo)).c_str(), &object);
 }
 
 // ----------------Editor Function for std::string----------------
 void EditorFunc(std::string& object, const std::meta::info& objectInfo)
 {
-  if (!objectInfo.is_nsdm())
-  {
-    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
-  }
-
-  ImGui::SameLine();
-  ImGui::InputText(std::format("##{}", std::meta::display_name_of(objectInfo)).c_str(), &object);
+  EditorMemberTitle(objectInfo);
+  
+  ImGui::InputText(std::format("##{}", std::meta::name_of(objectInfo)).c_str(), &object);
 }
 
 // ----------------Editor Function for enums----------------
 template <EnumType DataType>
 void EditorFunc(DataType& object, const std::meta::info& objectInfo)
 {
+  EditorMemberTitle(objectInfo);
+
   static std::string comboString = CreateComboStringFromEnum<DataType>();
-
-  if (!objectInfo.is_nsdm())
-  {
-    ImGui::Text(std::meta::display_name_of(objectInfo).c_str());
-  }
-
-  ImGui::SameLine();
-
-  static std::string imGuiName = std::format("##{}", std::meta::display_name_of(objectInfo));
+  std::string imGuiName = std::format("##{}", std::meta::name_of(objectInfo));
 
   int index = IndexFromEnum(object);
   ImGui::Combo(imGuiName.c_str(), &index, comboString.c_str());
 
   object = EnumFromIndex<DataType>(index);
+}
+
+// ----------------Editor Function for variant----------------
+template <VariantType DataType>
+std::string CreateComboStringFromVariant()
+{
+  std::string comboString;
+  for (const auto& val : GetVariantTypes<DataType>())
+  {
+    comboString += std::format("{}\0", std::meta::name_of(val));
+  }
+  return comboString;
+}
+
+template <VariantType DataType>
+void EditorFunc(DataType& object, const std::meta::info& objectInfo)
+{
+  if (ImGui::TreeNodeEx(std::meta::name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  {
+    EditorMemberTitle(objectInfo);
+
+    static std::string comboString = CreateComboStringFromVariant<DataType>();
+
+    int index = object.index();
+    std::string imGuiName = std::format("##{}", std::meta::name_of(objectInfo));
+    ImGui::Combo(imGuiName.c_str(), &index, comboString.c_str());
+
+    if (index != object.index())
+    {
+      DefaultTupleToIndex(object, index);
+    }
+    std::visit([&](auto& val) { RunObjectImGuiEditorInterface(val, std::meta::info{}); }, object);
+    ImGui::TreePop();
+  }
 }
 
 
@@ -733,7 +856,7 @@ template <GenerateProperties editorProperties, auto... Tags>
 void GenerateObjectImGuiEditorInterface(auto& object, const std::meta::info& objectInfo)
 {
   // For struct like types
-  if (ImGui::TreeNodeEx(std::meta::display_name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
+  if (ImGui::TreeNodeEx(std::meta::name_of(objectInfo).data(), ImGuiTreeNodeFlags_AllowItemOverlap))
   {
     // If it has the Array tag and they are all the same numeric type 
     if constexpr (GetTemplateArg<ClassFormat, Tags...>() == ClassFormat::Array && AllSameNumeric<decltype(object)>)
