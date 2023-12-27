@@ -193,11 +193,11 @@ struct PropertyOptions
   // explicit nonEditable option
   bool nonEditable = true;
 
-  ToJsonFunc<DataType> toJsonFunc = [](json& j, const DataType& dataType) constexpr
+  ToJsonFunc<DataType> toJsonFunc = [](json& j, const DataType& dataType) consteval
   {
     j[std::meta::name_of(^dataType)] = dataType;
   };
-  FromJsonFunc<DataType> fromJsonFunc = [](const json& j, DataType& dataType) constexpr
+  FromJsonFunc<DataType> fromJsonFunc = [](const json& j, DataType& dataType) consteval
   {
     dataType = j.value(std::meta::name_of(^dataType), dataType);
   };
