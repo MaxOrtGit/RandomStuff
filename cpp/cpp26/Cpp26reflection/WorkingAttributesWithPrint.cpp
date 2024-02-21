@@ -136,7 +136,7 @@ consteval std::optional<Attribute> GetAttribute()
     for (auto arg : meta::template_arguments_of(typeInfo)) // std::views::drop(1) should be used but there is an issue with the ranges header
     {
       // If the type is the same as Attribute
-      if (meta::dealias(meta::type_of(arg)) == ^Attribute)
+      if (!meta::is_type(arg) && meta::dealias(meta::type_of(arg)) == ^Attribute)
       {
         // Return the value within the argument
         return meta::value_of<Attribute>(arg);
