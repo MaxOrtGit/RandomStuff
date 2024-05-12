@@ -1,0 +1,32 @@
+{
+  "files.associations": {
+    "*.VERTEX": "glsl",
+    "algorithm": "cpp",
+    "array": "cpp",
+    "chrono": "cpp",
+    "deque": "cpp",
+    "execution": "cpp",
+    "filesystem": "cpp",
+    "format": "cpp",
+    "forward_list": "cpp",
+    "functional": "cpp",
+    "initializer_list": "cpp",
+    "iterator": "cpp",
+    "list": "cpp",
+    "memory": "cpp",
+    "numeric": "cpp",
+    "queue": "cpp",
+    "random": "cpp",
+    "ranges": "cpp",
+    "span": "cpp",
+    "valarray": "cpp",
+    "vector": "cpp",
+    "xhash": "cpp",
+    "xlocmon": "cpp",
+    "xlocnum": "cpp",
+    "xmemory": "cpp",
+    "xstring": "cpp",
+    "xtree": "cpp",
+    "xutility": "cpp"
+  }
+}
