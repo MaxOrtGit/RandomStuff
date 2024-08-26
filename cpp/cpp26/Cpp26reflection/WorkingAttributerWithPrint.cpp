@@ -5,23 +5,22 @@
 #include <optional>
 
 // Design explanations:
-// This is bad and I know it is. This is more of an example this it is "possible".
-//
-// Many times I pass in the std::meta::info of a type insead of the type, 
+// Many times I pass in the std::meta::info of a type instead of the type, 
 //  that is because it dealiases it if passed as a template arg.
 //  Also because of this you cant look at the attributes within the Print function.
-//   A work around could be having the Print function be templated with the type std::meta::info instead.
+//   I've spent many hours trying to pass attributes into the Print function but it is impossible because 
+//    you would need to have self as a template arg or an incomplete template so I'm not sure if it is possible
 //
-// Would use std::format but there are issues in the header
+// I would use std::format but there are issues in the header
 //
-// I also don't use inheritance because it messes with the constructor so you have to do FloatVec2{{}, x, y}
+// I also don't use inheriting from a "Print" class because it messes with the constructor so you have to do FloatVec2{{}, x, y}
 //
 // Issues I ran into:
 // Constexpr members dealias the type so I can't put an attributer on it (in general keeping the alias of a type is walking on nails)
-// Comparisons are not very stable and I get tons of "Compilation" aborted. The follow code does not work:
+// Comparisons are not very stable and I get tons of "Compilation aborted". The following code does not work as of doing this project:
 //   static_assert(^int == ^int);
-// name_of doesn't write of the name of the type many times and the best way to actually figure out what a 
-//  meta::info is to send it as a template to a function that throws and read what the error mesage names it
+// name_of doesn't write the name of the type many times and the best way to actually figure out what a 
+//  meta::info is to send it as a template to a function that throws and read what the name in the error message is
 //  
 
 
