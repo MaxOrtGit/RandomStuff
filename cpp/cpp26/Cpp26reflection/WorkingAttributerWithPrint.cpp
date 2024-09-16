@@ -4,12 +4,13 @@
 #include <iostream>
 #include <optional>
 
-// Design explanations:
+// Design explanations (as of 2996R5):
 // Many times I pass in the std::meta::info of a type instead of the type, 
 //  that is because it dealiases it if passed as a template arg.
 //  Also because of this you cant look at the attributes within the Print function.
 //   I've spent many hours trying to pass attributes into the Print function but it is impossible because 
 //    you would need to have self as a template arg or an incomplete template so I'm not sure if it is possible
+//   It could possibly work if you store the function as a meta::info but just testing would take a full rewrite
 //
 // I would use std::format but there are issues in the header
 //
@@ -19,11 +20,32 @@
 // Constexpr members dealias the type so I can't put an attributer on it (in general keeping the alias of a type is walking on nails)
 // Comparisons are not very stable and I get tons of "Compilation aborted". The following code does not work as of doing this project:
 //   static_assert(^int == ^int);
-// name_of doesn't write the name of the type many times and the best way to actually figure out what a 
-//  meta::info is to send it as a template to a function that throws and read what the name in the error message is
 //  
 
 
+/* needed for Clang
+namespace __impl {
+  template<auto... vals>
+  struct replicator_type {
+    template<typename F>
+      constexpr void operator>>(F body) const {
+        (body.template operator()<vals>(), ...);
+      }
+  };
+
+  template<auto... vals>
+  replicator_type<vals...> replicator = {};
+}
+
+template<typename R>
+consteval auto expand(R range) {
+  std::vector<std::meta::info> args;
+  for (auto r : range) {
+    args.push_back(reflect_value(r));
+  }
+  return substitute(^__impl::replicator, args);
+}
+*/
 
 // --------------- Utils ---------------
 
@@ -37,10 +59,10 @@ concept EnumType = std::is_enum_v<T>;
 template<EnumType E>
 constexpr std::string enum_to_string(E value) {
   std::string result = "<unnamed>";
-  [:expand(std::meta::enumerators_of(^E)):] >>
-  [&]<auto e>{
+  [:expand(meta::enumerators_of(^E)):] >> [&]<auto e>
+  {
     if (value == [:e:]) {
-      result = meta::name_of(e);
+      result = meta::identifier_of(e);
     }
   };
   return result;
@@ -106,7 +128,7 @@ consteval std::optional<VariableType> GetConstexprVariable()
                         == meta::dealias(std::meta::substitute(^std::remove_cvref_t, {^VariableType})))
       {
         // Return the value within the constexpr variable
-        out = meta::value_of<VariableType>(member);
+        out = meta::extract<VariableType>(member);
       }
     };
     return out;
@@ -130,7 +152,7 @@ consteval std::optional<Attribute> GetAttribute()
   // Checks if it is a template
   // It can be any template so we can alias it
   if constexpr (meta::has_template_arguments(typeInfo))// && meta::template_of(typeInfo) == ^Attributer)
-  {
+  { 
     // Look through the template args
     for (auto arg : meta::template_arguments_of(typeInfo)) // std::views::drop(1) should be used but there is an issue with the ranges header
     {
@@ -138,7 +160,7 @@ consteval std::optional<Attribute> GetAttribute()
       if (!meta::is_type(arg) && meta::dealias(meta::type_of(arg)) == ^Attribute)
       {
         // Return the value within the argument
-        return meta::value_of<Attribute>(arg);
+        return meta::extract<Attribute>(arg);
       }
     }
   }
@@ -178,7 +200,7 @@ consteval auto GetPrintAttribute()// -> PrintAttribute<typename[:meta::type_of(m
 }
 
 // --------- "Aliasing" attribute ---------
-// I havent investigated this side too much but because we need to template the attribute we cant just use ues a varibale
+// I havent investigated this side too much but because we need to template the attribute we cant just use a variable
 template <typename T> 
 consteval auto CustomPrintAttribute(PrintFunc<T> func)
 {
@@ -251,7 +273,7 @@ consteval bool DoPrint(PrintProperties<T> properties, const PA& attribute)
   }
 
   // If nsdm excluded 
-  else if (meta::is_nsdm(member) && !properties.printNSDM)
+  else if (meta::is_nonstatic_data_member(member) && !properties.printNSDM)
     return false;
 
   // If static variables excluded 
@@ -292,7 +314,7 @@ void Print(std::string_view name, const T& value)
     [&]<auto member>
     {
       // If it is not a variable skip (is_variable doesn't include nsdm)
-      if constexpr (!meta::is_nsdm(member) && !meta::is_variable(member))
+      if constexpr (!meta::is_nonstatic_data_member(member) && !meta::is_variable(member))
       {
         return;
       }
@@ -305,7 +327,7 @@ void Print(std::string_view name, const T& value)
         if constexpr (DoPrint<member>(properties, attribute))
         {
           PrintTabs();
-          attribute.func(meta::name_of(member), value.[:member:]);
+          attribute.func(meta::identifier_of(member), value.[:member:]);
         }
       }
     };
@@ -335,8 +357,9 @@ void OtherPrint(std::string_view name, const T& value)
 // --------- Simple ---------
 struct FloatVec2
 {
-  float x;
-  float y;
+  // Needs to be double or it will de-alias f2 and f3 in complex (bug)
+  double x;
+  double y;
 };
 
 void SimpleMain()
@@ -344,7 +367,7 @@ void SimpleMain()
   std::cout << "Struct Print:\n";
   // Not sure if we can avoid passing a string
   FloatVec2 vec2{1, 2};
-  Print(meta::name_of(^vec2), vec2);
+  Print(meta::identifier_of(^vec2), vec2);
 }
 
 
@@ -352,8 +375,8 @@ void SimpleMain()
 struct Complex
 {
 public: // By default all public members are printed
-  // Default print variable
-  float f;
+  // Needs to be a double or it will de-alias f2 and f3 (bug)
+  double f;
 
   // Attributer with print attribute
   Attributer<float, PrintAttribute<float>{.func = OtherPrint}> f2;
@@ -363,6 +386,8 @@ public: // By default all public members are printed
   [](std::string_view name, const float& value) {
     std::cout << name << " >>> " << value << "\n"; 
   }> f3;
+
+  bool smart = false;
 
   // Class print
   FloatVec2 vec;
@@ -377,8 +402,11 @@ private: // By default all private members aren't printed
   friend void Print(std::string_view, const T&);
 
   // Will be printed because we set the properties below
-  static inline int globalEditCounter = 0;
-
+  // Needs to be a long or it will be skipped
+  static inline long globalEditCounter = 0;
+  
+  // Temporarily disabled local print properties override
+  //   Currently constexpr members get de-aliased when reflecting so it would be printed
   // Attributers dont work on constexpr so setting is below(gets dealiased for some reason)
   // Setting the printProperties within the class
   //  we could do this outside of the class like with bool/enum but because func is nullptr we
@@ -389,8 +417,9 @@ public:
   Complex(float f, float f2, float f3, FloatVec2 vec) : f(f), f2(f2), f3(f3), vec(vec), hidden(1) {};
 };
 
-// Because of issues with constexpr and attributers I need to override
-// I have to set all the variables
+// Temporary fix for constexpr being de-aliassed
+// Because of issues with constexpr and attributers I need to override here
+// All the variables must be restated
 template <>
 struct PrintProperties<Complex>
 {
@@ -399,15 +428,14 @@ struct PrintProperties<Complex>
   bool printPrivate = true;  // changed
 
   bool printNSDM = true;
-  bool printStatic = true;
+  bool printStatic = true; // changed
 };
-
 
 void ComplicatedMain()
 {
   std::cout << "\nClass Print:\n";
   Complex comp{1, 2, 3, {4, 5}};
-  Print(meta::name_of(^comp), comp);
+  Print(meta::identifier_of(^comp), comp);
 }
 
 // --------- Non-struct/outside code ---------
@@ -427,7 +455,7 @@ void EnumMain()
 {
   std::cout << "\nEnum Print:\n";
   Color color = Color::red;
-  Print(meta::name_of(^color), color);
+  Print(meta::identifier_of(^color), color);
 }
 
 
