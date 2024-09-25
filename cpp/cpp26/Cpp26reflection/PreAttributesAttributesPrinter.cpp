@@ -4,6 +4,10 @@
 #include <iostream>
 #include <optional>
 
+// ------------------------------------------------------------------------------------------------------------------------------
+// ----- Basically all of this is obsolete because of the annotations proposal please see AttributesModernJsonExtension.cpp -----
+// ------------------------------------------------------------------------------------------------------------------------------
+
 // Design explanations (as of 2996R5):
 // Many times I pass in the std::meta::info of a type instead of the type, 
 //  that is because it dealiases it if passed as a template arg.
